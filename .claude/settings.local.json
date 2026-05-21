@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python scripts/migrate.py)",
+      "Bash(python -c ' *)",
+      "Bash(pip install *)",
+      "Bash(python -)",
+      "Bash(python scripts/seed_portfolio.py)",
+      "Bash(python -c \"import sqlite3; conn = sqlite3.connect\\('benchmarking.db'\\); cur = conn.cursor\\(\\); cur.execute\\('SELECT name FROM sqlite_master WHERE type=\\\\\"table\\\\\"'\\); print\\('Tables:', cur.fetchall\\(\\)\\); cur.execute\\('SELECT COUNT\\(*\\) FROM companies'\\); print\\('Companies:', cur.fetchone\\(\\)\\); cur.execute\\('SELECT COUNT\\(*\\) FROM kpi_data'\\); print\\('KPI rows:', cur.fetchone\\(\\)\\); conn.close\\(\\)\")",
+      "Bash(python -c \"import streamlit; print\\('streamlit:', streamlit.__version__\\)\")",
+      "Bash(python -c \"import plotly; print\\('plotly:', plotly.__version__\\)\")",
+      "Bash(python -c \"import pandas; print\\('pandas:', pandas.__version__\\)\")",
+      "Bash(streamlit run *)",
+      "Bash(python *)",
+      "Bash(python3 -)"
+    ]
+  }
+}
