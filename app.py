@@ -629,7 +629,10 @@ def render_benchmarking_tab(
     ltm_gm_pct: float | None = None,
     ltm_em_pct: float | None = None,
 ) -> None:
+    import math
+
     company_name = info["name"]
+    company_id   = int(info["id"])
     comp_mapping = load_comp_mapping(company_name)
 
     if comp_mapping.empty:
@@ -660,184 +663,558 @@ def render_benchmarking_tab(
     bench = compute_comp_benchmarks(comps)
     gaps  = compute_gap_analysis(ltm_gm_pct, ltm_em_pct, bench, ltm_val)
 
-    # ── ARR estimation disclaimer ────────────────────────────────────────────
-    if ltm_lbl == "ARR (est.)":
-        st.markdown(
-            f"<div style='background:{WARN_BG};border:1px solid {WARN};border-radius:8px;"
-            f"padding:10px 14px;font-size:12px;color:{WARN};margin-bottom:12px'>"
-            f"<b>Note:</b> LTM revenue is estimated from ARR — benchmarking comparisons "
-            f"(including the implied exit value below) should be treated as "
-            f"<b>directional only</b>.</div>",
-            unsafe_allow_html=True,
-        )
-
-    # ── Comp overview metrics ────────────────────────────────────────────────
     n_total  = bench["n_total"]
     n_hi     = bench["n_hi_conf"]
     comp_rev = bench.get("revenue_at_exit_usd_m")
     comp_gm  = bench.get("gross_margin_pct")
     comp_em  = bench.get("ebitda_margin_pct")
     comp_ev  = bench.get("ev_revenue_multiple")
+    rev_m    = ltm_val / 1e6 if ltm_val else None
 
-    b1, b2, b3, b4 = st.columns(4)
-    b1.metric("Comps in Set",         f"{n_total}  ({n_hi} high-conf.)")
-    b2.metric("Median Rev at Exit",   fmt_usd((comp_rev or 0) * 1e6) if comp_rev else "—")
-    b3.metric("Median Gross Margin",  fmt_pct(comp_gm))
-    b4.metric("Median EBITDA Margin", fmt_pct(comp_em))
+    # ── ARR disclaimer ─────────────────────────────────────────────────────────
+    if ltm_lbl == "ARR (est.)":
+        st.markdown(
+            f"<div style='background:{WARN_BG};border:1px solid {WARN};border-radius:8px;"
+            f"padding:10px 14px;font-size:12px;color:{WARN};margin-bottom:16px'>"
+            f"<b>Note:</b> LTM revenue is estimated from ARR — benchmarking comparisons "
+            f"should be treated as <b>directional only</b>.</div>",
+            unsafe_allow_html=True,
+        )
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    # ── Section 1: Summary stat cards ─────────────────────────────────────────
+    def _arrow_sublabel(co_val, med_val, suffix="pp"):
+        if _is_null(co_val) or _is_null(med_val):
+            return f"<div style='font-size:12px;color:{MUTED};margin-top:5px'>Portfolio: —</div>"
+        delta = float(co_val) - float(med_val)
+        arrow = "↑" if delta > 0 else ("↓" if delta < 0 else "→")
+        col   = "#2E7D32" if delta > 0 else ("#C62828" if delta < 0 else MUTED)
+        sign  = "+" if delta > 0 else ""
+        return (
+            f"<div style='font-size:12px;color:{col};font-weight:600;margin-top:5px'>"
+            f"{arrow}&nbsp;{fmt_pct(co_val)}"
+            f"&nbsp;<span style='font-weight:400;color:{MUTED}'>({sign}{delta:.1f}{suffix} vs median)</span>"
+            f"</div>"
+        )
 
-    # ── Gap analysis cards ───────────────────────────────────────────────────
-    STATUS_CFG = {
-        "ahead":    ("#E8F5E9", "#2E7D32", "AHEAD"),
-        "on_track": ("#E3F2FD", "#1565C0", "ON TRACK"),
-        "behind":   (WARN_BG,   WARN,       "BEHIND"),
-        "no_data":  ("#F5F5F5", MUTED,      "NO DATA"),
-        "scale":    ("#F3E5F5", "#6A1B9A",  "SCALE"),
-    }
+    def _stat_card(label, value_str, sub_html=""):
+        return (
+            f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
+            f"padding:18px 20px'>"
+            f"<div style='font-size:10px;text-transform:uppercase;letter-spacing:.6px;"
+            f"color:{MUTED};font-weight:600;margin-bottom:6px'>{label}</div>"
+            f"<div style='font-size:24px;font-weight:700;color:{BLACK}'>{value_str}</div>"
+            f"{sub_html}"
+            f"</div>"
+        )
 
-    st.markdown(
-        f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
-        f"color:{MUTED};font-weight:600;margin-bottom:10px'>Performance vs. Comp Medians</div>",
-        unsafe_allow_html=True,
-    )
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown(
+            _stat_card(
+                "Comps in Set", str(n_total),
+                f"<div style='font-size:12px;color:{MUTED};margin-top:5px'>{n_hi} high-confidence</div>",
+            ),
+            unsafe_allow_html=True,
+        )
+    with c2:
+        rev_str = fmt_usd(comp_rev * 1e6) if comp_rev else "—"
+        st.markdown(_stat_card("Median Exit Revenue", rev_str), unsafe_allow_html=True)
+    with c3:
+        st.markdown(
+            _stat_card("Median Gross Margin", fmt_pct(comp_gm), _arrow_sublabel(ltm_gm_pct, comp_gm)),
+            unsafe_allow_html=True,
+        )
+    with c4:
+        st.markdown(
+            _stat_card("Median EBITDA Margin", fmt_pct(comp_em), _arrow_sublabel(ltm_em_pct, comp_em)),
+            unsafe_allow_html=True,
+        )
 
-    gap_cols = st.columns(max(len(gaps), 1))
-    for col, g in zip(gap_cols, gaps):
-        bg, fg, badge = STATUS_CFG.get(g["status"], STATUS_CFG["no_data"])
-        co_val  = g["company_val"]
-        med_val = g["comp_median"]
-        delta   = g["delta"]
-        fmt     = g["fmt"]
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
-        if fmt == "pct":
-            co_str  = fmt_pct(co_val)
-            med_str = fmt_pct(med_val)
-            delta_str = (
-                f"+{delta:.1f}pp" if delta is not None and delta >= 0
-                else f"{delta:.1f}pp" if delta is not None
-                else "—"
+    # ── Section 2: Gap analysis (left) + Radar chart (right) ──────────────────
+    col_left, col_right = st.columns(2, gap="large")
+
+    with col_left:
+        st.markdown(
+            f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
+            f"color:{MUTED};font-weight:600;margin-bottom:12px'>Performance vs. Comp Medians</div>",
+            unsafe_allow_html=True,
+        )
+        STATUS_CFG = {
+            "ahead":    ("#2E7D32", GREEN,     "#E8F5E9", "AHEAD"),
+            "on_track": ("#1565C0", BLUE,      "#E3F2FD", "ON TRACK"),
+            "behind":   (WARN,     WARN_BG,    WARN_BG,   "BEHIND"),
+            "no_data":  (MUTED,    "#F5F5F5",  "#F5F5F5", "NO DATA"),
+            "scale":    ("#6A1B9A", "#F3E5F5", "#F3E5F5", "SCALE"),
+        }
+        for g in gaps:
+            border_c, bar_c, badge_bg, badge_txt = STATUS_CFG.get(g["status"], STATUS_CFG["no_data"])
+            co_val  = g["company_val"]
+            med_val = g["comp_median"]
+
+            if g["fmt"] == "pct":
+                co_str    = fmt_pct(co_val)
+                med_str   = fmt_pct(med_val)
+                delta_str = (
+                    f"+{g['delta']:.1f}pp" if g["delta"] is not None and g["delta"] >= 0
+                    else f"{g['delta']:.1f}pp" if g["delta"] is not None
+                    else "—"
+                )
+                if co_val is not None and med_val is not None:
+                    ref     = max(abs(med_val), abs(co_val), 1)
+                    bar_pct = min(max((co_val + ref) / (ref * 2) * 100, 0), 100)
+                else:
+                    bar_pct = 0
+            elif g["fmt"] == "usd_m":
+                co_str    = f"${co_val:.1f}M"  if co_val  is not None else "—"
+                med_str   = f"${med_val:.1f}M" if med_val is not None else "—"
+                delta_str = f"{g['delta']:.0f}% of comp exit scale" if g["delta"] is not None else "—"
+                bar_pct   = min(g["delta"] or 0, 100)
+            else:
+                co_str = med_str = delta_str = "—"
+                bar_pct = 0
+
+            st.markdown(
+                f"<div style='border-left:4px solid {border_c};background:{WHITE};"
+                f"border-radius:0 10px 10px 0;padding:14px 16px;margin-bottom:12px;"
+                f"box-shadow:0 1px 3px rgba(0,0,0,.04)'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+                f"<span style='font-size:10px;text-transform:uppercase;letter-spacing:.5px;"
+                f"color:{MUTED};font-weight:600'>{g['label']}</span>"
+                f"<span style='background:{badge_bg};color:{border_c};border-radius:4px;"
+                f"padding:2px 8px;font-size:10px;font-weight:700'>{badge_txt}</span>"
+                f"</div>"
+                f"<div style='display:flex;align-items:baseline;gap:8px;margin-bottom:10px;flex-wrap:wrap'>"
+                f"<span style='font-size:20px;font-weight:700;color:{BLACK}'>{co_str}</span>"
+                f"<span style='font-size:12px;color:{MUTED}'>vs {med_str} median</span>"
+                f"<span style='font-size:12px;color:{border_c};font-weight:600'>{delta_str}</span>"
+                f"</div>"
+                f"<div style='background:{BG};border-radius:4px;height:6px;overflow:hidden'>"
+                f"<div style='background:{border_c};height:6px;width:{bar_pct:.0f}%;border-radius:4px'></div>"
+                f"</div>"
+                f"<div style='display:flex;justify-content:space-between;margin-top:3px'>"
+                f"<span style='font-size:10px;color:{MUTED}'>0</span>"
+                f"<span style='font-size:10px;color:{MUTED}'>Comp median</span>"
+                f"</div></div>",
+                unsafe_allow_html=True,
             )
-        elif fmt == "usd_m":
-            co_str    = f"${co_val:.1f}M"  if co_val  is not None else "—"
-            med_str   = f"${med_val:.1f}M" if med_val is not None else "—"
-            delta_str = f"{delta:.0f}% of comp exit scale" if delta is not None else "—"
+
+    with col_right:
+        # ── Radar chart ───────────────────────────────────────────────────────
+        def _norm(val, lo, hi):
+            if val is None:
+                return 0
+            return max(0.0, min(100.0, (val - lo) / (hi - lo) * 100))
+
+        co_gm_r = _norm(ltm_gm_pct, 0, 80)
+        md_gm_r = _norm(comp_gm,    0, 80)
+
+        co_em_r = _norm(ltm_em_pct, -80, 40)
+        md_em_r = _norm(comp_em,    -80, 40)
+
+        co_rev_r = (
+            min(rev_m / comp_rev * 100, 100) if rev_m and comp_rev and comp_rev > 0 else 0
+        )
+        md_rev_r = 100.0
+
+        hq = str(info.get("hq_country", "")).lower()
+        REGION_KEYS = {
+            "kenya":        ["ssa", "africa", "kenya", "east africa"],
+            "nigeria":      ["ssa", "africa", "nigeria", "west africa"],
+            "south africa": ["ssa", "africa", "south africa"],
+            "egypt":        ["mena", "north africa", "egypt"],
+            "ghana":        ["ssa", "africa", "ghana"],
+            "mexico":       ["latam", "latin america", "mexico"],
+            "brazil":       ["latam", "latin america", "brazil"],
+            "india":        ["south asia", "india"],
+            "indonesia":    ["sea", "southeast asia", "indonesia"],
+        }
+        region_keys = next((v for k, v in REGION_KEYS.items() if k in hq), [hq[:3]] if hq else [])
+        if not comps.empty and "geography" in comps.columns and region_keys:
+            geo_hits = comps["geography"].apply(
+                lambda g: any(k in str(g).lower() for k in region_keys) if not _is_null(g) else False
+            )
+            co_geo_r = float(geo_hits.sum()) / len(comps) * 100
         else:
-            co_str = med_str = delta_str = "—"
+            co_geo_r = 50.0
+        md_geo_r = 100.0
 
-        col.markdown(f"""
-<div style="background:{WHITE};border:1px solid {BORDER};border-radius:10px;padding:16px 18px;">
-  <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;
-              color:{MUTED};margin-bottom:6px">{g['label']}</div>
-  <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px;flex-wrap:wrap">
-    <span style="font-size:22px;font-weight:700;color:{BLACK}">{co_str}</span>
-    <span style="font-size:12px;color:{MUTED}">vs {med_str} median</span>
-  </div>
-  <span style="background:{bg};color:{fg};border-radius:4px;
-               padding:2px 8px;font-size:11px;font-weight:600">{badge}</span>
-  <span style="font-size:11px;color:{MUTED};margin-left:6px">{delta_str}</span>
-</div>
-""", unsafe_allow_html=True)
+        try:
+            rv_kpi = kpis[kpis["revenue_usd"].notna()].sort_values("period_end_date")
+            if len(rv_kpi) >= 2:
+                old_rv = rv_kpi.iloc[max(0, len(rv_kpi) - 5)]["revenue_usd"]
+                new_rv = rv_kpi.iloc[-1]["revenue_usd"]
+                co_growth_raw = (new_rv - old_rv) / old_rv * 100 if old_rv > 0 else None
+            else:
+                co_growth_raw = None
+        except Exception:
+            co_growth_raw = None
 
-    # ── EV multiple context ──────────────────────────────────────────────────
-    if comp_ev is not None and ltm_val is not None:
-        implied_ev = ltm_val * comp_ev
-        st.markdown("<br>", unsafe_allow_html=True)
+        grow_col      = pd.to_numeric(
+            comps["revenue_growth_at_exit"] if "revenue_growth_at_exit" in comps else pd.Series(dtype=float),
+            errors="coerce",
+        ).dropna()
+        md_growth_raw = float(grow_col.median()) if not grow_col.empty else 60.0
+        co_growth_r   = _norm(co_growth_raw, 0, 200)
+        md_growth_r   = _norm(md_growth_raw, 0, 200)
+
+        latest_cust = None
+        for _cc in ["customer_count", "active_clients_count"]:
+            if _cc in kpis.columns:
+                _cv = kpis[_cc].dropna()
+                if not _cv.empty:
+                    latest_cust = float(_cv.iloc[-1])
+                    break
+        co_cust_r = (
+            min(_norm(math.log10(max(latest_cust, 1)), 0, 7), 100)
+            if latest_cust and latest_cust > 0 else 0.0
+        )
+        md_cust_r = 70.0
+
+        cats  = ["Gross Margin", "Revenue Scale", "EBITDA", "Geography", "Growth", "Customers"]
+        co_v  = [co_gm_r, co_rev_r, co_em_r, co_geo_r, co_growth_r, co_cust_r]
+        md_v  = [md_gm_r, md_rev_r, md_em_r, md_geo_r, md_growth_r, md_cust_r]
+
+        fig_r = go.Figure()
+        fig_r.add_trace(go.Scatterpolar(
+            r=co_v + [co_v[0]], theta=cats + [cats[0]],
+            fill="toself", fillcolor="rgba(213,250,148,0.30)",
+            line=dict(color=BLACK, width=2), name=company_name,
+            hovertemplate="%{theta}: %{r:.0f}/100<extra></extra>",
+        ))
+        fig_r.add_trace(go.Scatterpolar(
+            r=md_v + [md_v[0]], theta=cats + [cats[0]],
+            fill="toself", fillcolor="rgba(197,229,255,0.30)",
+            line=dict(color="#1565C0", width=2, dash="dot"), name="Comp Median",
+            hovertemplate="%{theta}: %{r:.0f}/100<extra></extra>",
+        ))
+        fig_r.update_layout(
+            polar=dict(
+                bgcolor=WHITE,
+                radialaxis=dict(visible=False, range=[0, 100]),
+                angularaxis=dict(
+                    tickfont=dict(size=11, color=BLACK),
+                    linecolor=BORDER, gridcolor=BORDER,
+                ),
+            ),
+            showlegend=True,
+            legend=dict(
+                font=dict(size=11, color=BLACK), bgcolor=WHITE,
+                bordercolor=BORDER, borderwidth=1,
+                orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5,
+            ),
+            paper_bgcolor=BG,
+            margin=dict(l=30, r=30, t=20, b=50),
+            height=380,
+        )
+        st.plotly_chart(fig_r, use_container_width=True, config={"displayModeBar": False})
+
+    # ── Section 3: Implied exit value card (sector-aware) ─────────────────────
+    if ltm_val is not None and comp_rev is not None and comp_rev > 0:
+        sector = str(info.get("sector", "")).lower()
+
+        # ── derive the latest non-null value for a kpis column ───────────────
+        def _latest(col):
+            if col in kpis.columns:
+                v = kpis[col].dropna()
+                return float(v.iloc[-1]) if not v.empty else None
+            return None
+
+        # ── compute comp EV/EBITDA from comp rows ────────────────────────────
+        def _comp_ev_ebitda():
+            hi = (
+                comps[comps["data_confidence"].str.lower().isin(["high", "medium"])]
+                if "data_confidence" in comps.columns else comps
+            )
+            vals = []
+            for _, r in hi.iterrows():
+                ev  = r.get("exit_ev_usd_m")
+                rev = r.get("revenue_at_exit_usd_m")
+                em  = _parse_pct(r.get("ebitda_margin_pct"))
+                if not any(_is_null(x) for x in (ev, rev, em)) and em > 0 and rev > 0:
+                    vals.append(float(ev) / (float(rev) * em / 100))
+            return float(pd.Series(vals).median()) if vals else None
+
+        # ── sector routing ────────────────────────────────────────────────────
+        implied_ev   = None
+        multiple_val = None
+        method_lbl   = "EV/Revenue"
+        method_note  = "Comp median"
+        base_val     = ltm_val
+        base_lbl     = "LTM Revenue"
+
+        if sector == "lending":
+            loan_book = _latest("loan_book_gross_usd")
+            if loan_book and loan_book > 0:
+                pb_multiple  = 2.0
+                implied_ev   = loan_book * pb_multiple
+                multiple_val = pb_multiple
+                method_lbl   = "P/Book"
+                method_note  = "2.0x P/Book (SSA digital lender benchmark)"
+                base_val     = loan_book
+                base_lbl     = "Gross Loan Book"
+            elif comp_ev:
+                implied_ev   = ltm_val * comp_ev
+                multiple_val = comp_ev
+                method_note  = "Comp median EV/Revenue (loan book data unavailable)"
+
+        elif sector == "marketplace":
+            gmv = _latest("gmv_usd")
+            if gmv and gmv > 0:
+                ev_gmv       = 0.5
+                implied_ev   = gmv * ev_gmv
+                multiple_val = ev_gmv
+                method_lbl   = "EV/GMV"
+                method_note  = "0.5x EV/GMV (SSA marketplace benchmark)"
+                base_val     = gmv
+                base_lbl     = "LTM GMV"
+            elif comp_ev:
+                implied_ev   = ltm_val * comp_ev
+                multiple_val = comp_ev
+                method_note  = "Comp median EV/Revenue (GMV data unavailable)"
+
+        elif sector == "wealth_management":
+            aum = _latest("aum_usd")
+            if comp_ev:
+                implied_ev   = ltm_val * comp_ev
+                multiple_val = comp_ev
+                method_note  = (
+                    f"Comp median EV/Revenue · AUM multiple is more relevant "
+                    f"({fmt_usd(aum)} AUM available)" if aum
+                    else "Comp median EV/Revenue · AUM multiple preferred when AUM data available"
+                )
+
+        elif sector in ("iot_infrastructure", "saas"):
+            if ltm_em_pct is not None and ltm_em_pct > 0:
+                ltm_ebitda   = ltm_val * ltm_em_pct / 100
+                ev_ebitda    = _comp_ev_ebitda()
+                if ev_ebitda:
+                    implied_ev   = ltm_ebitda * ev_ebitda
+                    multiple_val = ev_ebitda
+                    method_lbl   = "EV/EBITDA"
+                    method_note  = f"{ev_ebitda:.1f}x EV/EBITDA (comp median, profitable)"
+                    base_val     = ltm_ebitda
+                    base_lbl     = "LTM EBITDA"
+            if implied_ev is None and comp_ev:
+                implied_ev   = ltm_val * comp_ev
+                multiple_val = comp_ev
+                method_note  = "Comp median EV/Revenue (pre-profitability)"
+
+        else:  # payments and default
+            if comp_ev:
+                implied_ev   = ltm_val * comp_ev
+                multiple_val = comp_ev
+                method_note  = "Comp median"
+
+        if implied_ev is not None and multiple_val is not None:
+            # scale bar always shows revenue position vs comp exit scale
+            scale_pct   = min(rev_m / comp_rev * 100, 100) if rev_m else 0
+            marker_left = max(5.0, min(scale_pct, 95.0))
+
+            st.markdown(
+                f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
+                f"padding:24px 28px;margin-bottom:20px'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:flex-start;"
+                f"flex-wrap:wrap;gap:8px;margin-bottom:14px'>"
+                f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
+                f"color:{MUTED};font-weight:600'>Implied Exit Value</div>"
+                f"<div style='background:{BG};border-radius:4px;padding:3px 10px;"
+                f"font-size:11px;font-weight:600;color:{BLACK}'>"
+                f"{multiple_val:.1f}x {method_lbl}</div>"
+                f"</div>"
+                f"<div style='display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:20px'>"
+                f"<span style='font-size:36px;font-weight:700;color:{BLACK}'>{fmt_usd(implied_ev)}</span>"
+                f"<span style='font-size:13px;color:{MUTED}'>{base_lbl}: {fmt_usd(base_val)}</span>"
+                f"</div>"
+                f"<div style='position:relative;height:14px;margin-bottom:6px'>"
+                f"<div style='background:linear-gradient(to right,{BG} 0%,{GREEN} 100%);"
+                f"border-radius:7px;height:14px;width:100%'></div>"
+                f"<div style='position:absolute;top:50%;left:{marker_left:.1f}%;"
+                f"transform:translate(-50%,-50%)'>"
+                f"<div style='width:20px;height:20px;border-radius:50%;background:{BLACK};"
+                f"border:3px solid {WHITE};box-shadow:0 0 0 2px {BLACK}'></div>"
+                f"</div></div>"
+                f"<div style='display:flex;justify-content:space-between;margin-bottom:14px'>"
+                f"<span style='font-size:11px;color:{MUTED}'>$0 revenue</span>"
+                f"<span style='font-size:11px;color:{MUTED}'>Comp median exit revenue ({fmt_usd(comp_rev * 1e6)})</span>"
+                f"</div>"
+                f"<div style='font-size:12px;color:{MUTED};border-top:1px solid {BORDER};padding-top:12px'>"
+                f"<b style='color:{BLACK}'>Methodology:</b> {method_note}. "
+                f"{company_name} is at <b style='color:{BLACK}'>{scale_pct:.0f}%</b> of comp median exit revenue scale."
+                f"</div></div>",
+                unsafe_allow_html=True,
+            )
+
+    # ── Section 4: Stage timeline ──────────────────────────────────────────────
+    snapshots = load_stage_snapshots(comp_ids)
+    if comp_rev is not None and comp_rev > 0 and ltm_val is not None:
+        ltm_m      = ltm_val / 1e6
+        scale_frac = ltm_m / comp_rev  # 0.0 → 1.0+
+
+        # Fixed 4-node stages with revenue thresholds as % of comp exit scale
+        STAGE_NODES = [
+            ("Early Stage", 0.00, 0.25),
+            ("Growth",      0.25, 0.60),
+            ("Pre-Exit",    0.60, 0.90),
+            ("Exit Ready",  0.90, None),
+        ]
+        current_stage_idx = 3
+        for si, (_, lo, hi) in enumerate(STAGE_NODES):
+            if hi is None or scale_frac < hi:
+                current_stage_idx = si
+                break
+
+        # Derive per-stage rev ranges and median GM from snapshot data when available
+        # _parse_pct handles "~40%", "(30%)", "60%+" — pd.to_numeric alone cannot
+        if not snapshots.empty:
+            for _col in ["gross_margin_pct", "ebitda_margin_pct", "revenue_growth_pct"]:
+                if _col in snapshots.columns:
+                    snapshots[_col] = snapshots[_col].apply(_parse_pct)
+            snapshots["rev_mid"] = snapshots["revenue_range_usd_m"].apply(_rev_range_mid)
+
+        def _stage_stats(lo_frac, hi_frac):
+            lo_m = comp_rev * lo_frac
+            hi_m = comp_rev * hi_frac if hi_frac else None
+            if snapshots.empty or "rev_mid" not in snapshots.columns:
+                return None, None
+            mask = snapshots["rev_mid"] >= lo_m
+            if hi_m is not None:
+                mask &= snapshots["rev_mid"] < hi_m
+            sub = snapshots[mask]
+            gm = sub["gross_margin_pct"].dropna().median() if not sub.empty else None
+            rev_lo = f"${lo_m:.0f}M"
+            rev_hi = f"${hi_m:.0f}M" if hi_m else f"${lo_m:.0f}M+"
+            return f"{rev_lo}–{rev_hi}", (float(gm) if not _is_null(gm) else None)
+
+        st.markdown(
+            f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
+            f"color:{MUTED};font-weight:600;margin-bottom:14px'>Stage Progression</div>",
+            unsafe_allow_html=True,
+        )
+
+        nodes_html = ""
+        for i, (stage_name, lo, hi) in enumerate(STAGE_NODES):
+            is_cur     = (i == current_stage_idx)
+            dot_bg     = GREEN  if is_cur else WHITE
+            dot_border = BLACK  if is_cur else BORDER
+            dot_size   = "20px" if is_cur else "14px"
+            lbl_fw     = "700"  if is_cur else "400"
+            lbl_col    = BLACK  if is_cur else MUTED
+            ll_bg      = BORDER if i > 0 else "transparent"
+            rl_bg      = BORDER if i < 3 else "transparent"
+            dot_shadow = f"0 0 0 3px {GREEN}" if is_cur else "none"
+
+            rev_range_str, gm_val = _stage_stats(lo, hi)
+            gm_str = fmt_pct(gm_val) if not _is_null(gm_val) else "—"
+
+            badge_html = (
+                f"<div style='background:{GREEN};color:{BLACK};border-radius:4px;"
+                f"padding:1px 8px;font-size:10px;font-weight:700;margin-bottom:5px;"
+                f"display:inline-block;white-space:nowrap'>{company_name}</div><br>"
+                if is_cur else "<br>"
+            )
+
+            nodes_html += (
+                f"<div style='flex:1;text-align:center;padding:0 8px'>"
+                f"{badge_html}"
+                f"<div style='font-size:13px;font-weight:{lbl_fw};color:{lbl_col};"
+                f"margin-bottom:10px'>{stage_name}</div>"
+                f"<div style='display:flex;align-items:center;justify-content:center;"
+                f"margin-bottom:10px'>"
+                f"<div style='height:2px;flex:1;background:{ll_bg}'></div>"
+                f"<div style='width:{dot_size};height:{dot_size};border-radius:50%;"
+                f"background:{dot_bg};border:2px solid {dot_border};flex-shrink:0;"
+                f"box-shadow:{dot_shadow}'></div>"
+                f"<div style='height:2px;flex:1;background:{rl_bg}'></div>"
+                f"</div>"
+                f"<div style='font-size:11px;color:{MUTED}'>{rev_range_str or '—'}</div>"
+                f"</div>"
+            )
+
         st.markdown(
             f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
-            f"padding:14px 18px;font-size:13px;color:{BLACK}'>"
-            f"<span style='font-size:11px;text-transform:uppercase;letter-spacing:.5px;"
-            f"color:{MUTED};font-weight:600'>Exit Multiple Context &nbsp; </span>"
-            f"At the comp median <b>{comp_ev:.1f}x EV/Revenue</b>, "
-            f"{company_name}'s {ltm_lbl} revenue ({fmt_usd(ltm_val)}) "
-            f"implies an enterprise value of <b>{fmt_usd(implied_ev)}</b>."
+            f"padding:24px 20px;display:flex;align-items:flex-start;margin-bottom:20px'>"
+            f"{nodes_html}</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Section 5: AI commentary card ─────────────────────────────────────────
+    commentary = st.session_state.get(f"upload_commentary_{company_id}")
+    if commentary:
+        st.markdown(
+            f"<div style='border-left:4px solid {GREEN};background:{WHITE};"
+            f"border-radius:0 10px 10px 0;padding:16px 20px;margin-bottom:20px;"
+            f"box-shadow:0 1px 3px rgba(0,0,0,.05)'>"
+            f"<div style='font-size:10px;text-transform:uppercase;letter-spacing:.6px;"
+            f"color:{MUTED};font-weight:600;margin-bottom:8px'>AI Commentary</div>"
+            f"<div style='font-size:13px;color:{BLACK};line-height:1.65'>{commentary}</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
 
-    # ── Stage snapshots at similar revenue ───────────────────────────────────
-    snapshots = load_stage_snapshots(comp_ids)
-    if not snapshots.empty and ltm_val is not None:
-        ltm_m = ltm_val / 1e6
-        snap  = snapshots.copy()
-        snap["rev_mid"]  = snap["revenue_range_usd_m"].apply(_rev_range_mid)
-        snap["rev_dist"] = (snap["rev_mid"] - ltm_m).abs()
-        closest = snap.nsmallest(3, "rev_dist")
-        if not closest.empty:
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown(
-                f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
-                f"color:{MUTED};font-weight:600;margin-bottom:10px'>"
-                f"Stage Snapshots at Similar Revenue &nbsp;"
-                f"<span style='font-size:11px;font-weight:400;text-transform:none;"
-                f"letter-spacing:0;color:{MUTED}'>({company_name} LTM: {fmt_usd(ltm_val)})</span>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-            disp = closest[[
-                "company_name", "stage", "revenue_range_usd_m",
-                "revenue_growth_pct", "gross_margin_pct", "ebitda_margin_pct",
-            ]].rename(columns={
-                "company_name":        "Comp",
-                "stage":               "Stage",
-                "revenue_range_usd_m": "Rev Range",
-                "revenue_growth_pct":  "Rev Growth",
-                "gross_margin_pct":    "Gross Margin",
-                "ebitda_margin_pct":   "EBITDA Margin",
-            }).reset_index(drop=True)
-            st.dataframe(disp, use_container_width=True, hide_index=True)
-
-    # ── Peer comp set table ──────────────────────────────────────────────────
-    st.markdown("<br>", unsafe_allow_html=True)
+    # ── Section 6: Peer comp table ────────────────────────────────────────────
     st.markdown(
         f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
-        f"color:{MUTED};font-weight:600;margin-bottom:10px'>Peer Comp Set</div>",
+        f"color:{MUTED};font-weight:600;margin-bottom:12px'>Peer Comp Set</div>",
         unsafe_allow_html=True,
     )
 
+    CONF_DOT = {"high": "#2E7D32", "medium": "#F57C00", "low": "#C62828"}
     REL_COLORS = {
         5: (GREEN,     BLACK),
-        4: (BLUE,      BLACK),
+        4: ("#D9F0D9", "#2E7D32"),
         3: ("#FFF9C4", "#795548"),
         2: ("#EFEBE9", MUTED),
         1: ("#F5F5F5", MUTED),
     }
 
     hdr_html = "".join(
-        f"<th style='padding:6px 10px;text-align:left;font-size:10px;"
-        f"text-transform:uppercase;letter-spacing:.5px;color:{MUTED};"
-        f"border-bottom:2px solid {BORDER};white-space:nowrap'>{h}</th>"
-        for h in ["Company", "Sub-sector", "Geography", "Rev at Exit",
-                  "Gross Margin", "EBITDA Margin", "EV/Rev", "Relevance", "Confidence"]
+        f"<th style='padding:8px 12px;text-align:left;font-size:10px;text-transform:uppercase;"
+        f"letter-spacing:.5px;color:{MUTED};border-bottom:2px solid {BORDER};white-space:nowrap;"
+        f"width:{w}'>{h}</th>"
+        for h, w in [
+            ("Company", "20%"), ("Sub-sector", "18%"), ("Geography", "10%"),
+            ("Rev at Exit", "10%"), ("Gross Margin", "10%"), ("EBITDA Margin", "10%"),
+            ("EV/Rev", "8%"), ("Relevance", "8%"), ("Conf.", "6%"),
+        ]
     )
 
     rows_html = ""
-    for _, row in comps.iterrows():
-        rel           = int(row["relevance_score"]) if not _is_null(row.get("relevance_score")) else 0
-        bg_r, fg_r    = REL_COLORS.get(rel, ("#F5F5F5", MUTED))
-        rev           = row.get("revenue_at_exit_usd_m")
-        gm            = row.get("gross_margin_pct")
-        em            = row.get("ebitda_margin_pct")
-        ev            = row.get("ev_revenue_multiple")
-        conf          = str(row.get("data_confidence", "—")).capitalize()
+    for idx, row in comps.iterrows():
+        rel        = int(row["relevance_score"]) if not _is_null(row.get("relevance_score")) else 0
+        bg_r, fg_r = REL_COLORS.get(rel, ("#F5F5F5", MUTED))
+        rev        = row.get("revenue_at_exit_usd_m")
+        gm         = row.get("gross_margin_pct")
+        em         = row.get("ebitda_margin_pct")
+        ev         = row.get("ev_revenue_multiple")
+        conf_raw   = str(row.get("data_confidence", "")).lower()
+        conf_dot_c = CONF_DOT.get(conf_raw, MUTED)
+        row_bg     = WHITE if idx % 2 == 0 else "#F9FAF7"
+
         rows_html += (
-            f"<tr style='border-bottom:1px solid {BORDER}'>"
-            f"<td style='padding:8px 10px;font-weight:600;color:{BLACK}'>{row['company_name']}</td>"
-            f"<td style='padding:8px 10px;font-size:12px;color:{MUTED};max-width:160px'>{row.get('sub_sector','—')}</td>"
-            f"<td style='padding:8px 10px;font-size:12px;color:{MUTED}'>{row.get('geography','—')}</td>"
-            f"<td style='padding:8px 10px;font-weight:500'>{'$'+str(round(rev))+'M' if not _is_null(rev) else '—'}</td>"
-            f"<td style='padding:8px 10px'>{fmt_pct(gm)}</td>"
-            f"<td style='padding:8px 10px'>{fmt_pct(em)}</td>"
-            f"<td style='padding:8px 10px'>{f'{ev:.1f}x' if not _is_null(ev) else '—'}</td>"
-            f"<td style='padding:8px 10px'>"
+            f"<tr style='background:{row_bg}'>"
+            f"<td style='padding:8px 12px;font-weight:600;color:{BLACK};width:20%'>{row['company_name']}</td>"
+            f"<td style='padding:8px 12px;font-size:12px;color:{MUTED};width:18%'>"
+            f"{(row.get('sub_sector') or '—').replace('_',' ').title()}</td>"
+            f"<td style='padding:8px 12px;font-size:12px;color:{MUTED};width:10%'>{row.get('geography','—')}</td>"
+            f"<td style='padding:8px 12px;font-weight:500;width:10%'>"
+            f"{'$'+str(round(rev))+'M' if not _is_null(rev) else '—'}</td>"
+            f"<td style='padding:8px 12px;width:10%'>{fmt_pct(gm)}</td>"
+            f"<td style='padding:8px 12px;width:10%'>{fmt_pct(em)}</td>"
+            f"<td style='padding:8px 12px;width:8%'>{f'{ev:.1f}x' if not _is_null(ev) else '—'}</td>"
+            f"<td style='padding:8px 12px;width:8%'>"
             f"<span style='background:{bg_r};color:{fg_r};border-radius:4px;"
-            f"padding:2px 7px;font-size:11px;font-weight:600'>{rel}/5</span></td>"
-            f"<td style='padding:8px 10px;font-size:11px;color:{MUTED}'>{conf}</td>"
+            f"padding:2px 8px;font-size:11px;font-weight:600'>{rel}/5</span></td>"
+            f"<td style='padding:8px 12px;width:6%;text-align:center'>"
+            f"<span title='{conf_raw.capitalize()}' style='display:inline-block;width:10px;height:10px;"
+            f"border-radius:50%;background:{conf_dot_c}'></span></td>"
             f"</tr>"
         )
 
     st.markdown(
-        f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;overflow:auto'>"
+        f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
+        f"overflow:auto;margin-bottom:20px'>"
         f"<table style='width:100%;border-collapse:collapse'>"
         f"<thead><tr style='background:{BG}'>{hdr_html}</tr></thead>"
         f"<tbody>{rows_html}</tbody>"
@@ -845,7 +1222,7 @@ def render_benchmarking_tab(
         unsafe_allow_html=True,
     )
 
-    # ── Mapping rationale expander ───────────────────────────────────────────
+    # ── Mapping rationale expander ─────────────────────────────────────────────
     with st.expander("Why these comps? (mapping rationale)"):
         for _, row in comps.iterrows():
             rationale = row.get("mapping_rationale", "")
@@ -1508,47 +1885,210 @@ elif st.session_state.page == "detail":
     tab_upload  = _tabs[2] if _has_upload else None
 
     with tab_perf:
-        # ── Financial performance charts ─────────────────────────────────────
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("#### Financial Performance")
+        # ── Chart palette ─────────────────────────────────────────────────────
+        C_REVENUE  = "#378ADD"
+        C_GM       = "#1D9E75"
+        C_EBITDA_P = "#2E7D32"   # positive EBITDA line
+        C_EBITDA_N = "#C62828"   # negative EBITDA line
+        C_CLIENTS  = "#7F77DD"
+        C_TPV_GMV  = "#378ADD"
+        CHART_H    = 280
+        CFG        = {"displayModeBar": False}
 
-        c1, c2 = st.columns(2)
-        with c1:
-            fig = line_chart(kpis, "revenue_usd", "Revenue (USD)", y_fmt="usd", fill=True)
-            if fig: st.plotly_chart(fig, use_container_width=True)
-            else:   _no_data_box("No revenue data")
+        # ── 24-month window ───────────────────────────────────────────────────
+        kpis_sorted = kpis.copy()
+        kpis_sorted["period_end_date"] = pd.to_datetime(kpis_sorted["period_end_date"], errors="coerce")
+        kpis_sorted = kpis_sorted.dropna(subset=["period_end_date"]).sort_values("period_end_date")
+        if len(kpis_sorted) > 0:
+            cutoff = kpis_sorted["period_end_date"].max() - pd.DateOffset(months=24)
+            kpis_24 = kpis_sorted[kpis_sorted["period_end_date"] >= cutoff].copy()
+        else:
+            kpis_24 = kpis_sorted.copy()
 
-        with c2:
-            fig = line_chart(kpis, "gross_margin_pct", "Gross Margin %", y_fmt="pct", fill=False)
-            if fig: st.plotly_chart(fig, use_container_width=True)
+        # ── Chart builders ────────────────────────────────────────────────────
+        def _base_layout(title, y_fmt):
+            return dict(
+                title=dict(text=title, font=dict(color=BLACK, size=13, weight=500), x=0, pad=dict(l=4)),
+                plot_bgcolor=WHITE, paper_bgcolor=WHITE,
+                font=dict(color=BLACK, size=11),
+                xaxis=dict(
+                    showgrid=False, tickformat="%b %Y", tickfont=dict(size=10),
+                    linecolor=BORDER, showline=True,
+                ),
+                yaxis=dict(
+                    showgrid=True, gridcolor="#F0F0EC",
+                    ticksuffix="%" if y_fmt == "pct" else "",
+                    tickprefix="$" if y_fmt == "usd" else "",
+                    tickfont=dict(size=10),
+                    zeroline=False,
+                ),
+                margin=dict(l=8, r=8, t=40, b=8),
+                height=CHART_H,
+                hovermode="x unified",
+                showlegend=False,
+            )
+
+        def _chart_card(fig):
+            """Wrap a plotly fig in a white card with border."""
+            st.markdown(
+                f"<div style='background:{WHITE};border:1px solid {BORDER};"
+                f"border-radius:10px;overflow:hidden;padding:4px 0 0 0'>",
+                unsafe_allow_html=True,
+            )
+            st.plotly_chart(fig, use_container_width=True, config=CFG)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        def _simple_chart(col, y_fmt, title, line_color):
+            sub = kpis_24[[col, "period_end_date"]].dropna()
+            if len(sub) < 2:
+                return None
+            hover = "$%{y:,.0f}" if y_fmt == "usd" else ("%{y:.1f}%" if y_fmt == "pct" else "%{y:,.0f}")
+            r, g, b = int(line_color[1:3], 16), int(line_color[3:5], 16), int(line_color[5:7], 16)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=sub["period_end_date"], y=sub[col],
+                mode="lines+markers",
+                line=dict(color=line_color, width=2),
+                marker=dict(size=4, color=line_color),
+                fill="tozeroy",
+                fillcolor=f"rgba({r},{g},{b},0.08)",
+                hovertemplate=f"%{{x|%b %Y}}<br>{hover}<extra></extra>",
+            ))
+            fig.update_layout(**_base_layout(title, y_fmt))
+            return fig
+
+        def _ebitda_chart(col, y_fmt, title):
+            sub = kpis_24[[col, "period_end_date"]].dropna()
+            if len(sub) < 2:
+                return None
+            hover = "$%{y:,.0f}" if y_fmt == "usd" else "%{y:.1f}%"
+            vals = sub[col].tolist()
+            dates = sub["period_end_date"].tolist()
+
+            # Single line colored by sign of most-recent value
+            is_pos = vals[-1] >= 0 if vals else True
+            line_color = C_EBITDA_P if is_pos else C_EBITDA_N
+
+            fig = go.Figure()
+            # Positive fill (above zero)
+            pos_y = [max(v, 0) for v in vals]
+            fig.add_trace(go.Scatter(
+                x=dates, y=pos_y, mode="none",
+                fill="tozeroy", fillcolor="rgba(46,125,50,0.10)",
+                showlegend=False, hoverinfo="skip",
+            ))
+            # Negative fill (below zero)
+            neg_y = [min(v, 0) for v in vals]
+            fig.add_trace(go.Scatter(
+                x=dates, y=neg_y, mode="none",
+                fill="tozeroy", fillcolor="rgba(198,40,40,0.10)",
+                showlegend=False, hoverinfo="skip",
+            ))
+            # Main line
+            fig.add_trace(go.Scatter(
+                x=dates, y=vals,
+                mode="lines+markers",
+                line=dict(color=line_color, width=2),
+                marker=dict(size=4, color=line_color),
+                hovertemplate=f"%{{x|%b %Y}}<br>{hover}<extra></extra>",
+            ))
+
+            layout = _base_layout(title, y_fmt)
+            layout["yaxis"]["zeroline"]      = True
+            layout["yaxis"]["zerolinecolor"] = "#555550"
+            layout["yaxis"]["zerolinewidth"] = 2
+
+            # Annotation: first profitable month or best EBITDA
+            ebitda_series = pd.Series(vals, index=dates)
+            annotations = []
+            pos_months = ebitda_series[ebitda_series > 0]
+            if not pos_months.empty:
+                first_pos_date = pos_months.index[0]
+                all_pos_before = ebitda_series.loc[:first_pos_date]
+                # "first profitable" if no positive values before this one
+                if (all_pos_before.iloc[:-1] <= 0).all():
+                    best_date  = ebitda_series.idxmax()
+                    label_date = first_pos_date
+                    ann_text   = "First profitable"
+                    # only show annotation if within chart window
+                    annotations.append(dict(
+                        x=label_date, y=ebitda_series[label_date],
+                        text=ann_text, showarrow=True, arrowhead=2,
+                        arrowcolor=C_EBITDA_P, font=dict(size=10, color=C_EBITDA_P),
+                        bgcolor=WHITE, bordercolor=C_EBITDA_P, borderwidth=1,
+                        borderpad=3, ax=0, ay=-30,
+                    ))
+                else:
+                    best_date = ebitda_series.idxmax()
+                    best_val  = ebitda_series[best_date]
+                    if best_date == ebitda_series.index[-1]:
+                        annotations.append(dict(
+                            x=best_date, y=best_val,
+                            text="Best EBITDA", showarrow=True, arrowhead=2,
+                            arrowcolor=C_EBITDA_P, font=dict(size=10, color=C_EBITDA_P),
+                            bgcolor=WHITE, bordercolor=C_EBITDA_P, borderwidth=1,
+                            borderpad=3, ax=0, ay=-30,
+                        ))
+            if annotations:
+                layout["annotations"] = annotations
+
+            fig.update_layout(**layout)
+            return fig
+
+        def _section_header(text):
+            st.markdown(
+                f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+                f"margin:18px 0 10px 0'>{text}</div>",
+                unsafe_allow_html=True,
+            )
+
+        # ── Financial Performance ─────────────────────────────────────────────
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        _section_header("Financial Performance")
+
+        # Revenue — full width
+        rev_fig = _simple_chart("revenue_usd", "usd", "Revenue (USD)", C_REVENUE)
+        if rev_fig:
+            _chart_card(rev_fig)
+        else:
+            _no_data_box("No revenue data")
+
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+        # Gross Margin and EBITDA Margin — 2 columns
+        ca, cb = st.columns(2)
+        with ca:
+            fig = _simple_chart("gross_margin_pct", "pct", "Gross Margin %", C_GM)
+            if fig: _chart_card(fig)
             else:   _no_data_box("No gross margin data")
-
-        c3, c4 = st.columns(2)
-        with c3:
-            fig = line_chart(kpis, "ebitda_usd", "EBITDA (USD)", y_fmt="usd", fill=True)
-            if fig: st.plotly_chart(fig, use_container_width=True)
-            else:   _no_data_box("No EBITDA data")
-
-        with c4:
-            fig = line_chart(kpis, "ebitda_margin_pct", "EBITDA Margin %", y_fmt="pct", fill=False)
-            if fig: st.plotly_chart(fig, use_container_width=True)
+        with cb:
+            fig = _ebitda_chart("ebitda_margin_pct", "pct", "EBITDA Margin %")
+            if fig: _chart_card(fig)
             else:   _no_data_box("No EBITDA margin data")
 
-        if kpis["customer_count"].notna().any():
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+        # EBITDA (USD) — full column within 2-col grid (leave right col empty)
+        cc, cd = st.columns(2)
+        with cc:
+            fig = _ebitda_chart("ebitda_usd", "usd", "EBITDA (USD)")
+            if fig: _chart_card(fig)
+            else:   _no_data_box("No EBITDA data")
+
+        # Customer / Active Clients — full width
+        if "customer_count" in kpis.columns and kpis["customer_count"].notna().any():
             cust_col, cust_lbl = "customer_count", "Customer Count"
-        elif kpis["active_clients_count"].notna().any():
+        elif "active_clients_count" in kpis.columns and kpis["active_clients_count"].notna().any():
             cust_col, cust_lbl = "active_clients_count", "Active Clients"
         else:
             cust_col, cust_lbl = None, None
 
         if cust_col:
-            c5, c6 = st.columns(2)
-            with c5:
-                fig = line_chart(kpis, cust_col, cust_lbl, y_fmt="number", fill=True)
-                if fig: st.plotly_chart(fig, use_container_width=True)
-                else:   _no_data_box()
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            fig = _simple_chart(cust_col, "number", cust_lbl, C_CLIENTS)
+            if fig: _chart_card(fig)
 
-        # ── Lending metrics ───────────────────────────────────────────────────
+        # ── Lending KPIs snapshot ─────────────────────────────────────────────
         LENDING_SNAPSHOT_METRICS = [
             ("loan_book_gross_usd",    "Net Loan Portfolio",  fmt_usd),
             ("net_yield_pct",          "Avg Interest Rate",   fmt_pct),
@@ -1564,98 +2104,70 @@ elif st.session_state.page == "detail":
                 if not _is_null(latest.get(k))
             ]
             if snapshot_vals:
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown("#### Lending KPIs (Latest Period)")
+                st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+                _section_header("Lending KPIs (Latest Period)")
                 snap_cols = st.columns(len(snapshot_vals))
                 for col, (lbl, val_str) in zip(snap_cols, snapshot_vals):
                     col.metric(lbl, val_str)
 
+        # ── Lending & credit metrics ──────────────────────────────────────────
         LENDING_METRICS = [
-            ("loan_book_gross_usd", "Net Loan Portfolio (USD)", "usd",  True),
-            ("par_30_pct",          "PAR 30+ %",                "pct",  False),
-            ("par_90_pct",          "PAR 90 %",                 "pct",  False),
-            ("npl_rate_pct",        "NPL Rate %",               "pct",  False),
-            ("net_yield_pct",       "Net Yield %",              "pct",  False),
-            ("nim_pct",             "Net Interest Margin %",    "pct",  False),
+            ("loan_book_gross_usd", "Net Loan Portfolio (USD)", "usd"),
+            ("par_30_pct",          "PAR 30+ %",                "pct"),
+            ("par_90_pct",          "PAR 90 %",                 "pct"),
+            ("npl_rate_pct",        "NPL Rate %",               "pct"),
+            ("net_yield_pct",       "Net Yield %",              "pct"),
+            ("nim_pct",             "Net Interest Margin %",    "pct"),
         ]
         lending_available = [
-            m for m in LENDING_METRICS
-            if m[0] in kpis.columns and kpis[m[0]].dropna().__len__() >= 2
+            (c, t, f) for c, t, f in LENDING_METRICS
+            if c in kpis.columns and kpis[c].dropna().__len__() >= 2
         ]
         if lending_available:
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("#### Lending & Credit Metrics")
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            _section_header("Lending & Credit Metrics")
             for i in range(0, len(lending_available), 2):
                 cols = st.columns(2)
                 for j, col in enumerate(cols):
                     if i + j < len(lending_available):
-                        c, ttl, fmt, fill = lending_available[i + j]
-                        fig = line_chart(kpis, c, ttl, y_fmt=fmt, fill=fill)
+                        c, t, f = lending_available[i + j]
+                        lc = C_REVENUE if f == "usd" else C_GM
+                        fig = _simple_chart(c, f, t, lc)
                         if fig:
-                            col.plotly_chart(fig, use_container_width=True)
+                            with col: _chart_card(fig)
 
-        # ── AUM metrics ───────────────────────────────────────────────────────
-        AUM_METRICS = [
-            ("aum_usd", "Assets Under Management (USD)", "usd", True),
-        ]
-        aum_available = [
-            m for m in AUM_METRICS
-            if m[0] in kpis.columns and kpis[m[0]].dropna().__len__() >= 2
-        ]
-        if aum_available:
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("#### Assets Under Management")
-            cols = st.columns(2)
-            for j, (c, ttl, fmt, fill) in enumerate(aum_available):
-                fig = line_chart(kpis, c, ttl, y_fmt=fmt, fill=fill)
-                if fig:
-                    cols[j].plotly_chart(fig, use_container_width=True)
+        # ── AUM ───────────────────────────────────────────────────────────────
+        if "aum_usd" in kpis.columns and kpis["aum_usd"].dropna().__len__() >= 2:
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            _section_header("Assets Under Management")
+            ce, _ = st.columns(2)
+            with ce:
+                fig = _simple_chart("aum_usd", "usd", "Assets Under Management (USD)", C_REVENUE)
+                if fig: _chart_card(fig)
 
-        # ── Other sector metrics ──────────────────────────────────────────────
+        # ── Sector metrics ────────────────────────────────────────────────────
         OTHER_METRICS = [
-            ("gmv_usd",                   "GMV (USD)",                    "usd",  True),
-            ("tpv_usd",                   "Total Payment Volume (USD)",   "usd",  True),
-            ("arr_usd",                   "ARR (USD)",                    "usd",  True),
-            ("net_revenue_retention_pct", "Net Revenue Retention %",      "pct",  False),
+            ("gmv_usd",                   "GMV (USD)",                  "usd", C_TPV_GMV),
+            ("tpv_usd",                   "Total Payment Volume (USD)", "usd", C_TPV_GMV),
+            ("arr_usd",                   "ARR (USD)",                  "usd", C_REVENUE),
+            ("net_revenue_retention_pct", "Net Revenue Retention %",   "pct", C_GM),
         ]
-        shown = {m[0] for m in lending_available} | {m[0] for m in aum_available}
+        shown = {c for c, *_ in lending_available} | {"aum_usd"}
         other_available = [
-            m for m in OTHER_METRICS
-            if m[0] not in shown
-            and m[0] in kpis.columns
-            and kpis[m[0]].dropna().__len__() >= 2
+            (c, t, f, lc) for c, t, f, lc in OTHER_METRICS
+            if c not in shown and c in kpis.columns and kpis[c].dropna().__len__() >= 2
         ]
         if other_available:
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("#### Sector Metrics")
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            _section_header("Sector Metrics")
             for i in range(0, len(other_available), 2):
                 cols = st.columns(2)
                 for j, col in enumerate(cols):
                     if i + j < len(other_available):
-                        c, ttl, fmt, fill = other_available[i + j]
-                        fig = line_chart(kpis, c, ttl, y_fmt=fmt, fill=fill)
+                        c, t, f, lc = other_available[i + j]
+                        fig = _simple_chart(c, f, t, lc)
                         if fig:
-                            col.plotly_chart(fig, use_container_width=True)
-
-        # ── Raw data table ────────────────────────────────────────────────────
-        st.markdown("<br>", unsafe_allow_html=True)
-        with st.expander("Raw data table"):
-            candidate_cols = [
-                "period_end_date", "revenue_usd", "gross_margin_pct",
-                "ebitda_usd", "ebitda_margin_pct",
-                "customer_count", "active_clients_count",
-                "arr_usd", "aum_usd", "gmv_usd", "tpv_usd",
-                "loan_book_gross_usd", "par_30_pct", "par_90_pct",
-                "npl_rate_pct", "net_yield_pct", "unique_borrowers_count",
-            ]
-            show_cols = [
-                c for c in candidate_cols
-                if c in kpis.columns and kpis[c].notna().any()
-            ]
-            st.dataframe(
-                kpis[show_cols].sort_values("period_end_date", ascending=False).reset_index(drop=True),
-                use_container_width=True,
-            )
+                            with col: _chart_card(fig)
 
     with tab_bench:
         render_benchmarking_tab(info, kpis, ltm_val, ltm_lbl, ltm_gm_pct, ltm_em_pct)
