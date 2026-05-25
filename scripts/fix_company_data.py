@@ -310,81 +310,75 @@ print(f"  revenue_usd set from arr_usd for {n_rev}/{n_total} rows "
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 6. MAXSOKO  (company_id = 8)
-#    Summary / Consolidated sheets use cross-sheet formulas -> all cells return
-#    #VALUE! or None with data_only=True (no cached values in file).
-#    IS_Qrtly / IS_MOM sheets do not exist in this workbook.
-#    Fallback: Redash EG sheet has hardcoded Egypt data (Jan–Dec 2023).
-#      Row 2: period dates (datetime objects, normalised to month-end)
-#      Row 3: EGP/USD FX rate
-#      Row 7: Active Retailers         -> customer_count
-#      Row 10: GMV (EGP)               -> gmv_usd
-#      Row 12: NMV excl VAT (EGP)     -> revenue_usd (marketplace take-rate revenue)
-#      Row 14: Front Margin (EGP)     -> gross_profit_usd + gross_margin_pct
+#    Source: "Consolidated View " sheet, row 4 = month-end dates (USD),
+#    unique monthly columns (one per calendar month, skipping quarterly/annual
+#    summary columns that repeat the same year-month).
+#      Row 4:  month-end dates (datetime)
+#      Row 44: Total Revenues USD          -> revenue_usd
+#      Row 52: Gross Profit USD            -> gross_profit_usd
+#      Row 53: GP Margin % (decimal)       -> gross_margin_pct
+#      Row 10: E-Commerce GMV USD          -> gmv_usd
+#      Row 90: EBITDA USD                  -> ebitda_usd
+#    Note: the "Redash EG" sheet only contains Egypt-country data; using it
+#    previously produced Egypt-only figures (~$145M LTM vs $224.4M consolidated).
 # ══════════════════════════════════════════════════════════════════════════════
 print("\n--- MaxSoko ---")
+
+import calendar as _cal
 
 wb = openpyxl.load_workbook(
     "data/25 - 12 - MaxSoko Management Accounts.xlsx", data_only=True
 )
+ws_cv = wb["Consolidated View "]
 
-# Verify that Summary sheet has no usable data
-ws_sum = wb["Summary "]
-sample_vals = [
-    ws_sum.cell(r, c).value
-    for r in range(9, 50) for c in range(8, 20)
-    if ws_sum.cell(r, c).value not in (None, "#VALUE!")
-]
-if not sample_vals:
-    print("  Summary / Consolidated sheets: all formula cells returned #VALUE! "
-          "(no cached values). Using Redash EG sheet instead.")
-
-ws_eg = wb["Redash EG"]
-
-# Collect date columns from row 2
-eg_date_cols: dict[int, str] = {}
-for c in range(3, ws_eg.max_column + 1):
-    raw = ws_eg.cell(2, c).value
-    if raw is None:
+# Identify unique monthly columns from row 4 (first occurrence of each year-month)
+seen_ym: set = set()
+cv_date_cols: dict[int, str] = {}
+for c in range(1, ws_cv.max_column + 1):
+    raw = ws_cv.cell(4, c).value
+    if not isinstance(raw, datetime):
         continue
-    d = to_month_end(raw)
-    if d:
-        eg_date_cols[c] = d
+    ym = (raw.year, raw.month)
+    if ym in seen_ym:
+        continue
+    seen_ym.add(ym)
+    last_day = _cal.monthrange(raw.year, raw.month)[1]
+    cv_date_cols[c] = date(raw.year, raw.month, last_day).isoformat()
 
 stats = {"inserted": 0, "updated": 0, "skipped": 0}
-for col, period in sorted(eg_date_cols.items(), key=lambda x: x[1]):
-    fx     = safe_float(ws_eg.cell(3,  col).value)   # EGP per USD
-    active = safe_float(ws_eg.cell(7,  col).value)   # Active Retailers
-    gmv_e  = safe_float(ws_eg.cell(10, col).value)   # GMV (EGP)
-    nmv_e  = safe_float(ws_eg.cell(12, col).value)   # NMV excl VAT (EGP)
-    fm_e   = safe_float(ws_eg.cell(14, col).value)   # Front Margin (EGP)
-
-    if not fx or fx <= 0 or nmv_e is None or nmv_e == 0:
+for col, period in sorted(cv_date_cols.items(), key=lambda x: x[1]):
+    rev = safe_float(ws_cv.cell(44, col).value)   # Total Revenues USD
+    if rev is None or rev == 0:
         stats["skipped"] += 1
         continue
+    gp  = safe_float(ws_cv.cell(52, col).value)   # Gross Profit USD
+    gm  = safe_float(ws_cv.cell(53, col).value)   # GP Margin % (decimal)
+    ebt = safe_float(ws_cv.cell(90, col).value)   # EBITDA USD
+    gmv = safe_float(ws_cv.cell(10, col).value)   # E-Commerce GMV USD
 
-    rev_usd = nmv_e / fx
-    gmv_usd = gmv_e / fx if gmv_e else None
-    gp_usd  = fm_e  / fx if fm_e  else None
-    gm_pct  = (fm_e / nmv_e * 100) if fm_e else None
+    gm_pct = round(gm * 100, 4) if gm is not None else None
+    em_pct = round(ebt / rev * 100, 4) if ebt is not None and rev != 0 else None
 
     res = upsert({
         "company_id":         8,
         "period_end_date":    period,
-        "reporting_currency": "EGP",
-        "fx_rate_to_usd":     round(1 / fx, 6),      # 1 EGP in USD
-        "revenue_usd":        round(rev_usd, 2),
-        "gross_profit_usd":   round(gp_usd, 2) if gp_usd else None,
-        "gross_margin_pct":   round(gm_pct, 4) if gm_pct else None,
-        "gmv_usd":            round(gmv_usd, 2) if gmv_usd else None,
-        "customer_count":     int(active) if active else None,
+        "reporting_currency": "USD",
+        "fx_rate_to_usd":     1.0,
+        "revenue_usd":        round(rev, 2),
+        "gross_profit_usd":   round(gp, 2) if gp is not None else None,
+        "gross_margin_pct":   gm_pct,
+        "gmv_usd":            round(gmv, 2) if gmv is not None else None,
+        "ebitda_usd":         round(ebt, 2) if ebt is not None else None,
+        "ebitda_margin_pct":  em_pct,
     })
     stats[res] += 1
 
 conn.commit()
-print(f"  Redash EG: inserted={stats['inserted']}  updated={stats['updated']}  "
+print(f"  Consolidated View: inserted={stats['inserted']}  updated={stats['updated']}  "
       f"skipped={stats['skipped']}")
-if eg_date_cols:
-    print(f"  Date range: {min(eg_date_cols.values())} -> {max(eg_date_cols.values())}")
+if cv_date_cols:
+    periods_list = sorted(cv_date_cols.values())
+    print(f"  Date range: {periods_list[0]} -> {periods_list[-1]}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

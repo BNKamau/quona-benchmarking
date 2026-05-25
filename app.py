@@ -2,6 +2,10 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import plotly.graph_objects as go
+import anthropic
+import os
+from datetime import datetime
+from parsers.excel_parsers import PARSERS, SUPPORTED_COMPANIES
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -211,6 +215,20 @@ def load_ltm_revenue() -> pd.DataFrame:
         ORDER BY company_id, period_end_date DESC
     """, conn)
 
+    ebitda_data = pd.read_sql_query("""
+        SELECT company_id AS id, period_end_date, ebitda_usd
+        FROM kpi_snapshots
+        WHERE ebitda_usd IS NOT NULL
+        ORDER BY company_id, period_end_date DESC
+    """, conn)
+
+    gm_data = pd.read_sql_query("""
+        SELECT company_id AS id, period_end_date, revenue_usd, gross_margin_pct
+        FROM kpi_snapshots
+        WHERE gross_margin_pct IS NOT NULL AND revenue_usd IS NOT NULL
+        ORDER BY company_id, period_end_date DESC
+    """, conn)
+
     companies = pd.read_sql_query("SELECT id FROM companies", conn)
 
     results = []
@@ -226,20 +244,61 @@ def load_ltm_revenue() -> pd.DataFrame:
             period_type = pt_row.iloc[0]["period_type"]
             needed      = int(pt_row.iloc[0]["needed"])
 
+        ltm_ebitda_usd        = None
+        ltm_ebitda_margin_pct = None
+        ltm_gross_margin_pct  = None
+
         if n == 0:
             results.append({"id": cid, "ltm_revenue": None,
                             "ltm_label": "—", "ltm_periods_used": 0,
-                            "period_type": period_type, "periods_needed": needed})
+                            "period_type": period_type, "periods_needed": needed,
+                            "ltm_ebitda_usd": None, "ltm_ebitda_margin_pct": None,
+                            "ltm_gross_margin_pct": None})
         elif n >= needed:
             ltm = float(crev.head(needed)["revenue_usd"].sum())
+            top_periods = set(crev.head(needed)["period_end_date"].tolist())
+            ce = ebitda_data[
+                (ebitda_data["id"] == cid) &
+                (ebitda_data["period_end_date"].isin(top_periods))
+            ]
+            if len(ce) == needed:
+                ltm_ebitda_usd = float(ce["ebitda_usd"].sum())
+                if ltm > 0:
+                    ltm_ebitda_margin_pct = round(ltm_ebitda_usd / ltm * 100, 4)
+            # LTM gross margin: weighted average over LTM periods that have GM data
+            cgm = gm_data[
+                (gm_data["id"] == cid) &
+                (gm_data["period_end_date"].isin(top_periods))
+            ]
+            if len(cgm) > 0:
+                gp_sum  = (cgm["revenue_usd"] * cgm["gross_margin_pct"] / 100).sum()
+                rev_sum = cgm["revenue_usd"].sum()
+                if rev_sum > 0:
+                    ltm_gross_margin_pct = round(gp_sum / rev_sum * 100, 4)
             results.append({"id": cid, "ltm_revenue": ltm,
                             "ltm_label": "LTM", "ltm_periods_used": needed,
-                            "period_type": period_type, "periods_needed": needed})
+                            "period_type": period_type, "periods_needed": needed,
+                            "ltm_ebitda_usd": ltm_ebitda_usd,
+                            "ltm_ebitda_margin_pct": ltm_ebitda_margin_pct,
+                            "ltm_gross_margin_pct": ltm_gross_margin_pct})
         else:
             ltm = float(crev["revenue_usd"].sum() * (needed / n))
+            # Still compute partial LTM gross margin for ARR-estimated companies
+            partial_periods = set(crev["period_end_date"].tolist())
+            cgm = gm_data[
+                (gm_data["id"] == cid) &
+                (gm_data["period_end_date"].isin(partial_periods))
+            ]
+            if len(cgm) > 0:
+                gp_sum  = (cgm["revenue_usd"] * cgm["gross_margin_pct"] / 100).sum()
+                rev_sum = cgm["revenue_usd"].sum()
+                if rev_sum > 0:
+                    ltm_gross_margin_pct = round(gp_sum / rev_sum * 100, 4)
             results.append({"id": cid, "ltm_revenue": ltm,
                             "ltm_label": "ARR (est.)", "ltm_periods_used": n,
-                            "period_type": period_type, "periods_needed": needed})
+                            "period_type": period_type, "periods_needed": needed,
+                            "ltm_ebitda_usd": None, "ltm_ebitda_margin_pct": None,
+                            "ltm_gross_margin_pct": ltm_gross_margin_pct})
 
     return pd.DataFrame(results)
 
@@ -268,9 +327,10 @@ def load_kpis(company_id: int) -> pd.DataFrame:
                arr_usd, mrr_usd,
                customer_count, active_clients_count,
                net_revenue_retention_pct, cac_usd, ltv_usd,
-               loan_book_gross_usd, par_30_pct,
+               loan_book_gross_usd, par_30_pct, par_90_pct,
                npl_rate_pct, net_yield_pct, nim_pct,
-               aum_usd, gmv_usd, tpv_usd
+               aum_usd, gmv_usd, tpv_usd,
+               unique_borrowers_count
         FROM kpi_snapshots
         WHERE company_id = ?
         ORDER BY period_end_date
@@ -333,6 +393,23 @@ def as_of(date_val) -> str:
     except Exception:
         return "No data"
 
+def fmt_period_label(date_val, period_type: str = "monthly") -> str:
+    """Return a short period label: 'Dec \'25', 'Q4 \'25', or 'FY2025'."""
+    if _is_null(date_val):
+        return ""
+    try:
+        d = pd.to_datetime(date_val)
+        if pd.isna(d):
+            return ""
+        if period_type == "quarterly":
+            q = (d.month - 1) // 3 + 1
+            return f"Q{q} '{d.strftime('%y')}"
+        elif period_type == "annual":
+            return f"FY{d.year}"
+        return f"{d.strftime('%b')} '{d.strftime('%y')}"
+    except Exception:
+        return ""
+
 SECTOR_LABELS = {
     "wealth_management": "Wealth Mgmt",
     "payments":          "Payments",
@@ -394,7 +471,10 @@ def compute_comp_benchmarks(comps: pd.DataFrame) -> dict:
     }
 
 def compute_gap_analysis(
-    latest: pd.Series, bench: dict, ltm_rev_usd: float | None
+    gm_pct: float | None,
+    em_pct: float | None,
+    bench: dict,
+    ltm_rev_usd: float | None,
 ) -> list[dict]:
     rows: list[dict] = []
 
@@ -408,11 +488,8 @@ def compute_gap_analysis(
         rows.append(dict(label=label, company_val=co_val, comp_median=med,
                          delta=delta, status=status, fmt=fmt))
 
-    gm = float(latest["gross_margin_pct"]) if not _is_null(latest.get("gross_margin_pct")) else None
-    em = float(latest["ebitda_margin_pct"]) if not _is_null(latest.get("ebitda_margin_pct")) else None
-
-    _add("Gross Margin",  gm, bench.get("gross_margin_pct"),  5.0, -5.0,  "pct")
-    _add("EBITDA Margin", em, bench.get("ebitda_margin_pct"), 5.0, -10.0, "pct")
+    _add("Gross Margin",  gm_pct, bench.get("gross_margin_pct"),  5.0, -5.0,  "pct")
+    _add("EBITDA Margin", em_pct, bench.get("ebitda_margin_pct"), 5.0, -10.0, "pct")
 
     rev_m    = ltm_rev_usd / 1e6 if ltm_rev_usd else None
     comp_rev = bench.get("revenue_at_exit_usd_m")
@@ -549,6 +626,8 @@ def render_benchmarking_tab(
     kpis: pd.DataFrame,
     ltm_val: float | None,
     ltm_lbl: str,
+    ltm_gm_pct: float | None = None,
+    ltm_em_pct: float | None = None,
 ) -> None:
     company_name = info["name"]
     comp_mapping = load_comp_mapping(company_name)
@@ -578,9 +657,19 @@ def render_benchmarking_tab(
              .reset_index(drop=True)
     )
 
-    bench  = compute_comp_benchmarks(comps)
-    latest = kpis.iloc[-1] if not kpis.empty else pd.Series(dtype=object)
-    gaps   = compute_gap_analysis(latest, bench, ltm_val)
+    bench = compute_comp_benchmarks(comps)
+    gaps  = compute_gap_analysis(ltm_gm_pct, ltm_em_pct, bench, ltm_val)
+
+    # ── ARR estimation disclaimer ────────────────────────────────────────────
+    if ltm_lbl == "ARR (est.)":
+        st.markdown(
+            f"<div style='background:{WARN_BG};border:1px solid {WARN};border-radius:8px;"
+            f"padding:10px 14px;font-size:12px;color:{WARN};margin-bottom:12px'>"
+            f"<b>Note:</b> LTM revenue is estimated from ARR — benchmarking comparisons "
+            f"(including the implied exit value below) should be treated as "
+            f"<b>directional only</b>.</div>",
+            unsafe_allow_html=True,
+        )
 
     # ── Comp overview metrics ────────────────────────────────────────────────
     n_total  = bench["n_total"]
@@ -766,6 +855,314 @@ def render_benchmarking_tab(
                 )
 
 
+# ── DB write helpers ──────────────────────────────────────────────────────────
+
+def _existing_periods(company_id: int) -> set[str]:
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    rows = conn.execute(
+        "SELECT period_end_date FROM kpi_snapshots WHERE company_id = ?",
+        (company_id,),
+    ).fetchall()
+    conn.close()
+    return {r[0] for r in rows}
+
+
+def _upsert_kpi(company_id: int, data: dict) -> None:
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    now    = datetime.utcnow().isoformat()
+    period = data["period_end_date"]
+
+    existing = conn.execute(
+        "SELECT id FROM kpi_snapshots WHERE company_id=? AND period_end_date=?",
+        (company_id, period),
+    ).fetchone()
+
+    if existing:
+        update_cols = {
+            k: v for k, v in data.items()
+            if k != "period_end_date" and v is not None
+        }
+        if update_cols:
+            set_clause = ", ".join(f"{k}=?" for k in update_cols)
+            conn.execute(
+                f"UPDATE kpi_snapshots SET {set_clause}, updated_at=? "
+                f"WHERE company_id=? AND period_end_date=?",
+                [*update_cols.values(), now, company_id, period],
+            )
+    else:
+        row = {"company_id": company_id, "created_at": now, "updated_at": now,
+               **{k: v for k, v in data.items() if v is not None}}
+        cols_str    = ", ".join(row.keys())
+        placeholders = ", ".join("?" * len(row))
+        conn.execute(
+            f"INSERT INTO kpi_snapshots ({cols_str}) VALUES ({placeholders})",
+            list(row.values()),
+        )
+
+    conn.commit()
+    conn.close()
+
+
+def _generate_commentary(
+    company_name: str,
+    sector: str,
+    new_periods: list[dict],
+) -> str:
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return "Commentary unavailable — set the ANTHROPIC_API_KEY environment variable."
+
+    # Comp benchmarks (best-effort)
+    bench_txt = ""
+    try:
+        mapping = load_comp_mapping(company_name)
+        if not mapping.empty:
+            comps = load_comps_detail(tuple(mapping["comp_id"].tolist()))
+            if not comps.empty:
+                b = compute_comp_benchmarks(comps)
+                bench_txt = (
+                    f"\n\nComp set benchmarks (medians, {b['n_total']} exit comps): "
+                    f"Gross Margin {fmt_pct(b.get('gross_margin_pct'))}, "
+                    f"EBITDA Margin {fmt_pct(b.get('ebitda_margin_pct'))}, "
+                    f"Revenue at Exit {fmt_usd((b.get('revenue_at_exit_usd_m') or 0) * 1e6)}, "
+                    f"EV/Revenue {b.get('ev_revenue_multiple') or '—'}x."
+                )
+    except Exception:
+        pass
+
+    # Per-period summary lines
+    lines = []
+    for p in sorted(new_periods, key=lambda x: x["period_end_date"]):
+        rev = p.get("revenue_usd")
+        gm  = p.get("gross_margin_pct")
+        ebt = p.get("ebitda_usd")
+        em  = p.get("ebitda_margin_pct") or (
+            round(ebt / rev * 100, 1) if (ebt and rev) else None
+        )
+        parts = [f"Revenue {fmt_usd(rev)}" if rev else "Revenue N/A"]
+        if gm is not None:
+            parts.append(f"Gross Margin {fmt_pct(gm)}")
+        if em is not None:
+            parts.append(f"EBITDA Margin {fmt_pct(em)}")
+        lines.append(f"  {p['period_end_date']}: {', '.join(parts)}")
+
+    prompt = (
+        f"You are an investment analyst at Quona Capital, a fintech-focused VC firm.\n"
+        f"Company: {company_name} | Sector: {sector.replace('_', ' ').title()}\n\n"
+        f"Newly uploaded performance data:\n" + "\n".join(lines) +
+        bench_txt +
+        "\n\nWrite a concise 3-4 sentence analyst commentary on this performance update. "
+        "Reference specific numbers, compare to comp benchmarks where data is available, "
+        "and highlight key trends or concerns. Use professional third-person style."
+    )
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return msg.content[0].text
+    except Exception as exc:
+        return f"Commentary generation failed: {exc}"
+
+
+# ── Upload tab renderer ────────────────────────────────────────────────────────
+
+def _build_preview_df(rows: list[dict]) -> pd.DataFrame:
+    """Build a display DataFrame from a list of parsed period dicts."""
+    preview_rows = []
+    for p in sorted(rows, key=lambda x: x["period_end_date"]):
+        rev = p.get("revenue_usd")
+        gm  = p.get("gross_margin_pct")
+        ebt = p.get("ebitda_usd")
+        em  = p.get("ebitda_margin_pct") or (
+            round(ebt / rev * 100, 1) if (ebt and rev) else None
+        )
+        row = {
+            "Period":        p["period_end_date"],
+            "Revenue (USD)": fmt_usd(rev),
+            "Gross Margin":  fmt_pct(gm),
+            "EBITDA Margin": fmt_pct(em),
+        }
+        if p.get("tpv_usd")             is not None: row["TPV (USD)"]     = fmt_usd(p["tpv_usd"])
+        if p.get("loan_book_gross_usd") is not None: row["Loan Book"]     = fmt_usd(p["loan_book_gross_usd"])
+        if p.get("net_yield_pct")       is not None: row["Net Yield"]     = fmt_pct(p["net_yield_pct"])
+        if p.get("par_30_pct")          is not None: row["PAR 30"]        = fmt_pct(p["par_30_pct"])
+        if p.get("gmv_usd")             is not None: row["GMV (USD)"]     = fmt_usd(p["gmv_usd"])
+        if p.get("customer_count")      is not None: row["Customers"]     = fmt_int(p["customer_count"])
+        elif p.get("active_clients_count") is not None: row["Active Clients"] = fmt_int(p["active_clients_count"])
+        preview_rows.append(row)
+    df = pd.DataFrame(preview_rows)
+    return df.loc[:, (df != "—").any(axis=0)]
+
+
+def render_upload_tab(info: pd.Series, company_id: int) -> None:
+    company_name = info["name"]
+
+    st.markdown(
+        f"<div style='color:{MUTED};font-size:12px;margin-bottom:16px;line-height:1.7'>"
+        f"Upload the latest Excel report for <b style='color:{BLACK}'>{company_name}</b>. "
+        f"The parser will extract new periods automatically and show a preview "
+        f"before writing anything to the database.</div>",
+        unsafe_allow_html=True,
+    )
+
+    uploaded = st.file_uploader(
+        "Select Excel file",
+        type=["xlsx"],
+        key=f"uploader_{company_id}",
+        label_visibility="collapsed",
+    )
+
+    # Session-state key names
+    ss_fkey       = f"upload_fkey_{company_id}"
+    ss_parsed     = f"upload_parsed_{company_id}"
+    ss_skip       = f"upload_skip_{company_id}"
+    ss_saved      = f"upload_saved_{company_id}"
+    ss_snap       = f"upload_snap_{company_id}"   # saved-periods snapshot for success display
+    ss_commentary = f"upload_commentary_{company_id}"
+
+    if uploaded is None:
+        for k in (ss_fkey, ss_parsed, ss_skip, ss_saved, ss_snap, ss_commentary):
+            st.session_state.pop(k, None)
+        return
+
+    file_key = f"{uploaded.name}_{uploaded.size}"
+
+    # ── SUCCESS STATE ─────────────────────────────────────────────────────────
+    # Must be checked BEFORE the parse block so the post-save rerun renders the
+    # success state rather than re-parsing the (now-stale) cached file key.
+    if st.session_state.get(ss_saved):
+        snap       = st.session_state.get(ss_snap, [])
+        commentary = st.session_state.get(ss_commentary, "")
+        skipped    = st.session_state.get(ss_skip, 0)
+
+        if skipped:
+            st.markdown(
+                f"<div style='color:{MUTED};font-size:12px;margin-bottom:8px'>"
+                f"{skipped} period(s) already in database — skipped.</div>",
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(
+            f"<div style='background:#E8F5E9;border:1px solid #2E7D32;border-radius:8px;"
+            f"padding:12px 18px;font-size:13px;color:#2E7D32;font-weight:600;margin-bottom:14px'>"
+            f"✓ {len(snap)} period(s) saved. Charts and benchmarking now reflect the "
+            f"updated data.</div>",
+            unsafe_allow_html=True,
+        )
+
+        if commentary:
+            st.markdown(
+                f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
+                f"color:{MUTED};font-weight:600;margin-bottom:8px'>AI Performance Commentary</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
+                f"padding:18px 22px;font-size:13px;line-height:1.85;color:{BLACK}'>"
+                f"{commentary}</div>",
+                unsafe_allow_html=True,
+            )
+
+        # Reset flag so next upload starts fresh (ss_fkey was cleared on save,
+        # so re-uploading the same file will trigger a real re-parse+dedup).
+        st.session_state[ss_saved] = False
+        return
+
+    # ── PARSE ─────────────────────────────────────────────────────────────────
+    # Re-parse whenever the file changes.  ss_fkey is cleared after every save,
+    # so re-uploading the same file always goes through this block.
+    if st.session_state.get(ss_fkey) != file_key:
+        with st.spinner("Reading and parsing Excel file…"):
+            try:
+                file_bytes = uploaded.read()
+                all_rows   = PARSERS[company_name](file_bytes)
+
+                existing = _existing_periods(company_id)
+                new_rows = [r for r in all_rows if r["period_end_date"] not in existing]
+                skipped  = len(all_rows) - len(new_rows)
+
+                st.session_state[ss_fkey]   = file_key
+                st.session_state[ss_parsed] = new_rows
+                st.session_state[ss_skip]   = skipped
+            except Exception as exc:
+                st.error(f"Parse error: {exc}")
+                return
+
+    # Safety net: re-filter cached results against the live DB in case the
+    # same file key is reused after a save (shouldn't happen with the fkey
+    # invalidation above, but guards against any edge case).
+    cached_rows = st.session_state.get(ss_parsed, [])
+    existing    = _existing_periods(company_id)
+    new_rows    = [r for r in cached_rows if r["period_end_date"] not in existing]
+    if len(new_rows) != len(cached_rows):
+        st.session_state[ss_parsed] = new_rows   # keep cache in sync
+    skipped = st.session_state.get(ss_skip, 0)
+
+    if skipped:
+        st.markdown(
+            f"<div style='color:{MUTED};font-size:12px;margin-bottom:8px'>"
+            f"{skipped} period(s) already in database — skipped.</div>",
+            unsafe_allow_html=True,
+        )
+
+    if not new_rows:
+        st.markdown(
+            f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
+            f"padding:28px;text-align:center;color:{MUTED};font-size:13px'>"
+            f"All periods in this file are already in the database. No new data to import.</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    # ── PREVIEW TABLE ─────────────────────────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
+        f"color:{MUTED};font-weight:600;margin-bottom:10px'>"
+        f"{len(new_rows)} new period(s) found — review before saving</div>",
+        unsafe_allow_html=True,
+    )
+    st.dataframe(_build_preview_df(new_rows), use_container_width=True, hide_index=True)
+
+    # ── CONFIRM BUTTON ────────────────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    btn_col, note_col = st.columns([1, 3])
+    with btn_col:
+        confirm = st.button(
+            "Confirm & Save to Database",
+            key=f"confirm_{company_id}",
+        )
+    with note_col:
+        st.markdown(
+            f"<div style='padding-top:8px;font-size:12px;color:{MUTED}'>"
+            f"Saves {len(new_rows)} period(s) for {company_name}. "
+            f"Existing periods are not overwritten.</div>",
+            unsafe_allow_html=True,
+        )
+
+    if confirm:
+        with st.spinner(f"Saving {len(new_rows)} period(s) to database…"):
+            for p in new_rows:
+                _upsert_kpi(company_id, p)
+
+        with st.spinner("Generating AI commentary…"):
+            commentary = _generate_commentary(
+                company_name, str(info.get("sector", "")), new_rows
+            )
+
+        st.session_state[ss_snap]       = list(new_rows)   # snapshot for success display
+        st.session_state[ss_commentary] = commentary
+        st.session_state[ss_saved]      = True
+        # Invalidate the file key cache so re-uploading the same file will
+        # trigger a fresh parse+dedup (not reuse stale ss_parsed).
+        st.session_state.pop(ss_fkey, None)
+        st.cache_data.clear()
+        st.rerun()
+
+
 # ── Session state ─────────────────────────────────────────────────────────────
 if "page" not in st.session_state:
     st.session_state.page = "home"
@@ -797,11 +1194,17 @@ if st.session_state.page == "home":
 
     # ── Summary KPIs ──────────────────────────────────────────────────────────
     col1, col2, col3, col4 = st.columns(4)
+    ltm_gm_col = companies["ltm_gross_margin_pct"].combine_first(
+        companies["gross_margin_pct"]
+    )
+    ltm_em_col = companies["ltm_ebitda_margin_pct"].combine_first(
+        companies["ebitda_margin_pct"]
+    )
     col1.metric("Portfolio Companies", len(companies))
     col2.metric("Combined LTM Revenue",
                 fmt_usd(companies["ltm_revenue"].sum()))
-    col3.metric("Avg Gross Margin",    fmt_pct(companies["gross_margin_pct"].mean()))
-    col4.metric("Avg EBITDA Margin",   fmt_pct(companies["ebitda_margin_pct"].mean()))
+    col3.metric("Avg Gross Margin",    fmt_pct(ltm_gm_col.mean()))
+    col4.metric("Avg EBITDA Margin",   fmt_pct(ltm_em_col.mean()))
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(
@@ -880,13 +1283,20 @@ if st.session_state.page == "home":
                 f"<div style='font-size:10px;color:{MUTED};margin-top:1px'>({sub})</div>"
                 if (not _is_null(ltm_val) and sub) else ""
             )
+            period_lbl = fmt_period_label(row.get("period_end_date"), pt)
+            period_sfx = (
+                f"<span style='font-size:13px;color:{MUTED};font-weight:400'> ({period_lbl})</span>"
+                if (period_lbl and not _is_null(ltm_val)) else ""
+            )
             st.markdown(
-                f"<span style='font-weight:600'>{fmt_usd(ltm_val)}</span>{basis_tag}",
+                f"<span style='font-weight:600'>{fmt_usd(ltm_val)}</span>{period_sfx}{basis_tag}",
                 unsafe_allow_html=True,
             )
 
         with r[3]:
-            gm    = row["gross_margin_pct"]
+            gm = row.get("ltm_gross_margin_pct")
+            if _is_null(gm):
+                gm = row["gross_margin_pct"]
             color = "#2E7D32" if (not _is_null(gm) and float(gm) > 50) else BLACK
             st.markdown(
                 f"<span style='color:{color};font-weight:500'>{fmt_pct(gm)}</span>",
@@ -894,7 +1304,9 @@ if st.session_state.page == "home":
             )
 
         with r[4]:
-            em    = row["ebitda_margin_pct"]
+            em = row.get("ltm_ebitda_margin_pct")
+            if _is_null(em):
+                em = row.get("ebitda_margin_pct")
             color = ("#2E7D32" if (not _is_null(em) and float(em) > 0)
                      else "#C62828" if (not _is_null(em))
                      else BLACK)
@@ -979,8 +1391,8 @@ if st.session_state.page == "home":
                 "LTM Revenue": fmt_usd(row.get("ltm_revenue")),
                 "Basis":       row.get("ltm_label", "—"),
                 "Period type": row.get("period_type", "—"),
-                "Gross Margin": fmt_pct(row.get("gross_margin_pct")),
-                "EBITDA Margin": fmt_pct(row.get("ebitda_margin_pct")),
+                "Gross Margin (LTM)": fmt_pct(row.get("ltm_gross_margin_pct") or row.get("gross_margin_pct")),
+                "EBITDA Margin (LTM)": fmt_pct(row.get("ltm_ebitda_margin_pct") or row.get("ebitda_margin_pct")),
                 "As of":       as_of(row.get("period_end_date")),
                 "Flags":       "; ".join(fl) if fl else "OK",
             })
@@ -1051,15 +1463,49 @@ elif st.session_state.page == "detail":
         f"{kpis['period_end_date'].max().strftime('%b %Y')}"
     )
 
+    ltm_em_pct = (
+        float(ltm_row.iloc[0]["ltm_ebitda_margin_pct"])
+        if not ltm_row.empty and not _is_null(ltm_row.iloc[0].get("ltm_ebitda_margin_pct"))
+        else None
+    )
+    ltm_gm_pct = (
+        float(ltm_row.iloc[0]["ltm_gross_margin_pct"])
+        if not ltm_row.empty and not _is_null(ltm_row.iloc[0].get("ltm_gross_margin_pct"))
+        else None
+    )
+    ebitda_margin_display = ltm_em_pct if ltm_em_pct is not None else (
+        float(latest.get("ebitda_margin_pct"))
+        if not _is_null(latest.get("ebitda_margin_pct")) else None
+    )
+    ebitda_margin_label = f"{ltm_lbl} EBITDA Margin" if ltm_em_pct is not None else "EBITDA Margin"
+    gm_display = ltm_gm_pct if ltm_gm_pct is not None else (
+        float(latest.get("gross_margin_pct"))
+        if not _is_null(latest.get("gross_margin_pct")) else None
+    )
+    gm_label = f"{ltm_lbl} Gross Margin" if ltm_gm_pct is not None else "Gross Margin"
+
+    latest_pt  = ltm_row.iloc[0]["period_type"] if not ltm_row.empty else "monthly"
+    latest_plbl = fmt_period_label(latest.get("period_end_date"), latest_pt)
+    latest_rev_display = (
+        f"{fmt_usd(latest.get('revenue_usd'))} ({latest_plbl})"
+        if latest_plbl and not _is_null(latest.get("revenue_usd"))
+        else fmt_usd(latest.get("revenue_usd"))
+    )
+
     m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric(f"{ltm_lbl} Revenue",         fmt_usd(ltm_val))
-    m2.metric("Revenue (latest)",            fmt_usd(latest.get("revenue_usd")))
-    m3.metric("Gross Margin",                fmt_pct(latest.get("gross_margin_pct")))
-    m4.metric("EBITDA Margin",               fmt_pct(latest.get("ebitda_margin_pct")))
+    m2.metric("Revenue (latest)",            latest_rev_display)
+    m3.metric(gm_label,                      fmt_pct(gm_display))
+    m4.metric(ebitda_margin_label,           fmt_pct(ebitda_margin_display))
     m5.metric("Customers / Clients",         fmt_int(customers))
     m6.metric("History", f"{len(kpis)} periods  ·  {date_range}")
 
-    tab_perf, tab_bench = st.tabs(["Performance", "Benchmarking"])
+    _has_upload = info["name"] in SUPPORTED_COMPANIES
+    _tab_names  = ["Performance", "Benchmarking"] + (["Upload Data"] if _has_upload else [])
+    _tabs       = st.tabs(_tab_names)
+    tab_perf    = _tabs[0]
+    tab_bench   = _tabs[1]
+    tab_upload  = _tabs[2] if _has_upload else None
 
     with tab_perf:
         # ── Financial performance charts ─────────────────────────────────────
@@ -1079,32 +1525,58 @@ elif st.session_state.page == "detail":
 
         c3, c4 = st.columns(2)
         with c3:
+            fig = line_chart(kpis, "ebitda_usd", "EBITDA (USD)", y_fmt="usd", fill=True)
+            if fig: st.plotly_chart(fig, use_container_width=True)
+            else:   _no_data_box("No EBITDA data")
+
+        with c4:
             fig = line_chart(kpis, "ebitda_margin_pct", "EBITDA Margin %", y_fmt="pct", fill=False)
             if fig: st.plotly_chart(fig, use_container_width=True)
             else:   _no_data_box("No EBITDA margin data")
 
-        with c4:
-            if kpis["customer_count"].notna().any():
-                cust_col, cust_lbl = "customer_count", "Customer Count"
-            elif kpis["active_clients_count"].notna().any():
-                cust_col, cust_lbl = "active_clients_count", "Active Clients"
-            else:
-                cust_col, cust_lbl = None, None
+        if kpis["customer_count"].notna().any():
+            cust_col, cust_lbl = "customer_count", "Customer Count"
+        elif kpis["active_clients_count"].notna().any():
+            cust_col, cust_lbl = "active_clients_count", "Active Clients"
+        else:
+            cust_col, cust_lbl = None, None
 
-            if cust_col:
+        if cust_col:
+            c5, c6 = st.columns(2)
+            with c5:
                 fig = line_chart(kpis, cust_col, cust_lbl, y_fmt="number", fill=True)
                 if fig: st.plotly_chart(fig, use_container_width=True)
                 else:   _no_data_box()
-            else:
-                _no_data_box("No customer data")
 
         # ── Lending metrics ───────────────────────────────────────────────────
+        LENDING_SNAPSHOT_METRICS = [
+            ("loan_book_gross_usd",    "Net Loan Portfolio",  fmt_usd),
+            ("net_yield_pct",          "Avg Interest Rate",   fmt_pct),
+            ("par_30_pct",             "PAR 30+",             fmt_pct),
+            ("par_90_pct",             "PAR 90",              fmt_pct),
+            ("active_clients_count",   "Active Clients",      fmt_int),
+            ("unique_borrowers_count", "Unique SMEs Funded",  fmt_int),
+        ]
+        if info["sector"] == "lending":
+            snapshot_vals = [
+                (lbl, fn(latest.get(k)))
+                for k, lbl, fn in LENDING_SNAPSHOT_METRICS
+                if not _is_null(latest.get(k))
+            ]
+            if snapshot_vals:
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("#### Lending KPIs (Latest Period)")
+                snap_cols = st.columns(len(snapshot_vals))
+                for col, (lbl, val_str) in zip(snap_cols, snapshot_vals):
+                    col.metric(lbl, val_str)
+
         LENDING_METRICS = [
-            ("loan_book_gross_usd", "Gross Loan Book (USD)", "usd",  True),
-            ("par_30_pct",          "PAR 30 %",              "pct",  False),
-            ("npl_rate_pct",        "NPL Rate %",            "pct",  False),
-            ("net_yield_pct",       "Net Yield %",           "pct",  False),
-            ("nim_pct",             "Net Interest Margin %", "pct",  False),
+            ("loan_book_gross_usd", "Net Loan Portfolio (USD)", "usd",  True),
+            ("par_30_pct",          "PAR 30+ %",                "pct",  False),
+            ("par_90_pct",          "PAR 90 %",                 "pct",  False),
+            ("npl_rate_pct",        "NPL Rate %",               "pct",  False),
+            ("net_yield_pct",       "Net Yield %",              "pct",  False),
+            ("nim_pct",             "Net Interest Margin %",    "pct",  False),
         ]
         lending_available = [
             m for m in LENDING_METRICS
@@ -1169,10 +1641,12 @@ elif st.session_state.page == "detail":
         st.markdown("<br>", unsafe_allow_html=True)
         with st.expander("Raw data table"):
             candidate_cols = [
-                "period_end_date", "revenue_usd", "gross_margin_pct", "ebitda_margin_pct",
+                "period_end_date", "revenue_usd", "gross_margin_pct",
+                "ebitda_usd", "ebitda_margin_pct",
                 "customer_count", "active_clients_count",
                 "arr_usd", "aum_usd", "gmv_usd", "tpv_usd",
-                "loan_book_gross_usd", "par_30_pct", "npl_rate_pct", "net_yield_pct",
+                "loan_book_gross_usd", "par_30_pct", "par_90_pct",
+                "npl_rate_pct", "net_yield_pct", "unique_borrowers_count",
             ]
             show_cols = [
                 c for c in candidate_cols
@@ -1184,4 +1658,8 @@ elif st.session_state.page == "detail":
             )
 
     with tab_bench:
-        render_benchmarking_tab(info, kpis, ltm_val, ltm_lbl)
+        render_benchmarking_tab(info, kpis, ltm_val, ltm_lbl, ltm_gm_pct, ltm_em_pct)
+
+    if tab_upload is not None:
+        with tab_upload:
+            render_upload_tab(info, company_id)
