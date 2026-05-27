@@ -2067,6 +2067,14 @@ def fetch_last_affinity_note_for_buyer(buyer_name: str, affinity_api_key: str) -
         notes.sort(key=_note_dt, reverse=True)
         latest = notes[0]
 
+        raw_date = latest.get("created_at", "")
+        note_dt = _note_dt(latest)
+        date_str = note_dt.strftime("%Y-%m-%d") if note_dt != datetime.min.replace(tzinfo=timezone.utc) else ""
+
+        cutoff = datetime.now(tz=timezone.utc) - timedelta(days=90)
+        if note_dt < cutoff:
+            return {"date": date_str, "creator_name": None, "snippet": None, "stale": True}
+
         creator_name = "Unknown"
         creator_id = latest.get("creator_id")
         if creator_id:
@@ -2078,12 +2086,22 @@ def fetch_last_affinity_note_for_buyer(buyer_name: str, affinity_api_key: str) -
                 pass
 
         content = (latest.get("content") or "").strip()
-        raw_date = latest.get("created_at", "")
-        note_dt = datetime.fromisoformat(raw_date) if raw_date else None
+        keywords = {"yoco", "exit", "acquisition", "strategic", "partnership", buyer_name.lower()}
+        relevant = [
+            s.strip() for s in content.replace("\n", " ").split(".")
+            if s.strip() and any(kw in s.lower() for kw in keywords)
+        ]
+        if relevant:
+            summary = ". ".join(relevant[:2]) + "."
+            summary = summary[:200] + ("…" if len(summary) > 200 else "")
+        else:
+            summary = "Note found — no exit-relevant content"
+
         return {
-            "date":         note_dt.strftime("%Y-%m-%d") if note_dt else "",
+            "date":         date_str,
             "creator_name": creator_name,
-            "snippet":      content[:120] + ("…" if len(content) > 120 else ""),
+            "snippet":      summary,
+            "stale":        False,
         }
     except Exception:
         return None
@@ -2187,15 +2205,21 @@ def _render_yoco_exit_tab() -> None:
                 )
             else:
                 note = affinity_cache.get(name)
-                if note:
+                if note is None:
                     st.markdown(
-                        f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
-                        f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                        f"<div style='font-size:11px;color:#B71C1C;padding-top:8px'>No recent contact</div>",
+                        unsafe_allow_html=True,
+                    )
+                elif note.get("stale"):
+                    st.markdown(
+                        f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                        f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                         unsafe_allow_html=True,
                     )
                 else:
                     st.markdown(
-                        f"<div style='font-size:11px;color:#B71C1C;padding-top:8px'>No recent contact</div>",
+                        f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
+                        f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
                         unsafe_allow_html=True,
                     )
         st.markdown("<div style='height:4px;border-bottom:1px solid #EFF0EA;margin-bottom:4px'></div>", unsafe_allow_html=True)
@@ -2253,12 +2277,27 @@ def _render_yoco_exit_tab() -> None:
                 }
             st.rerun()
 
+    _HDR_STYLE = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px;padding-bottom:4px"
+    )
+
+    def _header_row():
+        hcols = st.columns([2, 2, 3, 1, 2])
+        labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage Q3?", "Last Affinity Contact"]
+        for hc, lbl in zip(hcols, labels):
+            with hc:
+                st.markdown(f"<div style='{_HDR_STYLE}'>{lbl}</div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:2px;background:#EFF0EA;margin-bottom:8px'></div>", unsafe_allow_html=True)
+
     tab_local, tab_global = st.tabs(["Local Buyers", "Global Buyers"])
     with tab_local:
+        _header_row()
         for name, fit, activity, rationale in local_buyers:
             key = "engage_yoco_" + name.replace(" ", "")
             _buyer_row(name, fit, activity, rationale, key, affinity_cache)
     with tab_global:
+        _header_row()
         for name, fit, activity, rationale in global_buyers:
             key = "engage_yoco_" + name.replace(" ", "")
             _buyer_row(name, fit, activity, rationale, key, affinity_cache)
