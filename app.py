@@ -2003,6 +2003,14 @@ if st.session_state.page == "home":
     all_sectors = sorted(companies["sector"].dropna().unique().tolist())
     sector_options = ["All"] + [sector_label(s) for s in all_sectors]
 
+    selected_fund = st.radio(
+        "Filter by fund",
+        options=["All Funds", "Fund I", "Fund II", "Fund III"],
+        index=0,
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+
     filter_col, sort_col = st.columns([4, 1])
     with filter_col:
         selected_sector = st.radio(
@@ -2019,8 +2027,10 @@ if st.session_state.page == "home":
             label_visibility="collapsed",
         )
 
-    # Apply sector filter
+    # Apply fund filter, then sector filter
     filtered = companies.copy()
+    if selected_fund != "All Funds":
+        filtered = filtered[filtered["fund"] == selected_fund]
     if selected_sector != "All":
         filtered = filtered[filtered["sector"].apply(sector_label) == selected_sector]
 

@@ -12,7 +12,15 @@
       "Bash(python -c \"import pandas; print\\('pandas:', pandas.__version__\\)\")",
       "Bash(streamlit run *)",
       "Bash(python *)",
-      "Bash(python3 -)"
+      "Bash(python3 -)",
+      "Bash(sqlite3 benchmarking.db ' *)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 scripts/fix_verto_tpv.py)",
+      "Bash(git push *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(sqlite3 benchmarking.db \"SELECT id, name FROM companies ORDER BY name;\")",
+      "Bash(git commit *)"
     ]
   }
 }
