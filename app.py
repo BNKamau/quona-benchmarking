@@ -173,7 +173,7 @@ def load_stage_snapshots(comp_ids: tuple) -> pd.DataFrame:
 @st.cache_data(ttl=300)
 def load_companies() -> pd.DataFrame:
     return pd.read_sql_query("""
-        SELECT c.id, c.name, c.sector, c.hq_country, c.founded_year,
+        SELECT c.id, c.name, c.sector, c.hq_country, c.founded_year, c.fund,
                k.revenue_usd,
                k.ebitda_usd,
                k.gross_margin_pct,
@@ -2085,7 +2085,8 @@ if st.session_state.page == "home":
                 ("Customers",  fmt_int(cust),  BLACK),
             )
 
-    def _card_html(row: pd.Series) -> str:
+    def _render_card(col, row: pd.Series) -> None:
+        """Render a single company card inside a Streamlit column."""
         cid        = int(row["id"])
         name       = row["name"]
         sl         = sector_label(row.get("sector", ""))
@@ -2094,17 +2095,19 @@ if st.session_state.page == "home":
         ltm_lbl    = row.get("ltm_label", "")
         pt         = row.get("period_type", "monthly")
         period_lbl = fmt_period_label(row.get("period_end_date"), pt)
+        asof       = as_of(row.get("period_end_date"))
 
-        # LTM revenue display
+        # LTM revenue
         rev_str = fmt_usd(ltm_val)
-        rev_sub = ""
         if ltm_lbl == "LTM":
             basis   = "12 mo." if pt == "monthly" else "4 qtrs." if pt == "quarterly" else "annual"
             rev_sub = f"LTM · {basis}"
         elif ltm_lbl == "ARR (est.)":
             rev_sub = "ARR (est.)"
+        else:
+            rev_sub = ""
         if period_lbl and not _is_null(ltm_val):
-            rev_str += f" <span style='font-size:11px;font-weight:400;color:{MUTED}'>({period_lbl})</span>"
+            rev_str = f"{rev_str} ({period_lbl})"
 
         # Gross margin
         gm = row.get("ltm_gross_margin_pct")
@@ -2115,72 +2118,80 @@ if st.session_state.page == "home":
         # Revenue growth
         gtxt, gcol = fmt_growth(row.get("revenue_growth_pct"))
 
-        # Sector-specific pair
-        (lbl3, val3, col3), (lbl4, val4, col4) = _sector_metric_pair(row)
+        # Sector-specific metric
+        (lbl3, val3, col3), _ = _sector_metric_pair(row)
 
-        # As of
-        asof = as_of(row.get("period_end_date"))
+        with col:
+            with st.container(border=True):
+                # ── Header: name + sector tag ─────────────────────────────
+                st.markdown(
+                    f"<div style='display:flex;justify-content:space-between;"
+                    f"align-items:flex-start;margin-bottom:2px'>"
+                    f"<div>"
+                    f"<div style='font-size:16px;font-weight:800;color:{BLACK};"
+                    f"letter-spacing:-0.3px;line-height:1.2'>{name}</div>"
+                    f"<div style='font-size:10px;font-weight:600;color:{MUTED};"
+                    f"text-transform:uppercase;letter-spacing:.06em;margin-top:2px'>"
+                    f"{country}</div>"
+                    f"</div>"
+                    f"<span style='background:{BLUE};color:{BLACK};border-radius:99px;"
+                    f"padding:3px 10px;font-size:10px;font-weight:700;"
+                    f"letter-spacing:.04em;white-space:nowrap;flex-shrink:0;"
+                    f"margin-left:8px;margin-top:2px'>{sl}</span>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
 
-        card = f"""
-<div style="background:{WHITE};border:1px solid {BORDER};border-radius:12px;
-            overflow:hidden;cursor:pointer;height:100%">
-  <div style="padding:16px 16px 10px">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start">
-      <div>
-        <div style="font-size:16px;font-weight:800;color:{BLACK};letter-spacing:-0.3px">{name}</div>
-        <div style="font-size:10px;font-weight:600;color:{MUTED};margin-top:2px;
-                    letter-spacing:.06em;text-transform:uppercase">{country}</div>
-      </div>
-      <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;margin-left:8px">
-        <span style="background:{BLUE};color:{BLACK};border-radius:99px;
-                     padding:2px 10px;font-size:10px;font-weight:700;
-                     letter-spacing:.04em;white-space:nowrap">{sl}</span>
-      </div>
-    </div>
-  </div>
+                st.markdown(f"<hr style='margin:8px 0;border-color:{BORDER}'>",
+                            unsafe_allow_html=True)
 
-  <div style="height:1px;background:{BORDER};margin:0 16px"></div>
+                # ── Metrics: 2 columns x 2 rows ───────────────────────────
+                m1, m2 = st.columns(2)
+                m3, m4 = st.columns(2)
 
-  <div style="padding:10px 16px 6px">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0">
+                with m1:
+                    st.markdown(
+                        f"<div style='font-size:9px;font-weight:700;letter-spacing:.12em;"
+                        f"text-transform:uppercase;color:{MUTED};margin-bottom:1px'>LTM Revenue</div>"
+                        f"<div style='font-size:15px;font-weight:800;color:{BLACK}'>{rev_str}</div>"
+                        f"<div style='font-size:9px;color:{MUTED};margin-top:1px'>{rev_sub}</div>",
+                        unsafe_allow_html=True,
+                    )
+                with m2:
+                    st.markdown(
+                        f"<div style='font-size:9px;font-weight:700;letter-spacing:.12em;"
+                        f"text-transform:uppercase;color:{MUTED};margin-bottom:1px'>Gross Margin</div>"
+                        f"<div style='font-size:15px;font-weight:800;color:{gm_color}'>{gm_str}</div>",
+                        unsafe_allow_html=True,
+                    )
+                with m3:
+                    st.markdown(
+                        f"<div style='font-size:9px;font-weight:700;letter-spacing:.12em;"
+                        f"text-transform:uppercase;color:{MUTED};margin-bottom:1px'>Rev Growth</div>"
+                        f"<div style='font-size:15px;font-weight:800;color:{gcol}'>{gtxt}</div>",
+                        unsafe_allow_html=True,
+                    )
+                with m4:
+                    st.markdown(
+                        f"<div style='font-size:9px;font-weight:700;letter-spacing:.12em;"
+                        f"text-transform:uppercase;color:{MUTED};margin-bottom:1px'>{lbl3}</div>"
+                        f"<div style='font-size:15px;font-weight:800;color:{col3}'>{val3}</div>",
+                        unsafe_allow_html=True,
+                    )
 
-      <div style="padding:6px 0">
-        <div style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
-                    color:{MUTED};margin-bottom:2px">LTM Revenue</div>
-        <div style="font-size:15px;font-weight:800;color:{BLACK}">{rev_str}</div>
-        <div style="font-size:9px;color:{MUTED};margin-top:1px">{rev_sub}</div>
-      </div>
+                st.markdown(f"<hr style='margin:8px 0;border-color:{BORDER}'>",
+                            unsafe_allow_html=True)
 
-      <div style="padding:6px 0">
-        <div style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
-                    color:{MUTED};margin-bottom:2px">Gross Margin</div>
-        <div style="font-size:15px;font-weight:800;color:{gm_color}">{gm_str}</div>
-      </div>
-
-      <div style="padding:6px 0">
-        <div style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
-                    color:{MUTED};margin-bottom:2px">Rev Growth</div>
-        <div style="font-size:15px;font-weight:800;color:{gcol}">{gtxt}</div>
-      </div>
-
-      <div style="padding:6px 0">
-        <div style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
-                    color:{MUTED};margin-bottom:2px">{lbl3}</div>
-        <div style="font-size:15px;font-weight:800;color:{col3}">{val3}</div>
-      </div>
-
-    </div>
-  </div>
-
-  <div style="height:1px;background:{BORDER};margin:0 16px"></div>
-
-  <div style="padding:8px 16px 12px;display:flex;justify-content:space-between;align-items:center">
-    <div style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
-                color:{MUTED}">Exit Readiness</div>
-    <div style="font-size:9px;font-weight:600;color:{MUTED}">{asof}</div>
-  </div>
-</div>"""
-        return card
+                # ── Footer: as of date + view button ─────────────────────
+                st.markdown(
+                    f"<div style='font-size:9px;color:{MUTED};font-weight:600;"
+                    f"letter-spacing:.06em;margin-bottom:4px'>As of {asof}</div>",
+                    unsafe_allow_html=True,
+                )
+                if st.button("View company →", key=f"co_{cid}", use_container_width=True):
+                    st.session_state.page = "detail"
+                    st.session_state.company_id = cid
+                    st.rerun()
 
     # Render cards in rows of 3
     rows_iter = list(filtered.iterrows())
@@ -2188,14 +2199,8 @@ if st.session_state.page == "home":
         chunk = rows_iter[i:i+3]
         cols  = st.columns(3)
         for col, (_, row) in zip(cols, chunk):
-            cid = int(row["id"])
-            with col:
-                st.markdown(_card_html(row), unsafe_allow_html=True)
-                if st.button("View →", key=f"co_{cid}", use_container_width=True):
-                    st.session_state.page = "detail"
-                    st.session_state.company_id = cid
-                    st.rerun()
-        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+            _render_card(col, row)
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
     # ── LTM summary table (printed to console; also shown as expander) ────────
     with st.expander("LTM Revenue & data quality summary (all companies)"):
