@@ -158,7 +158,9 @@ def load_comps_detail(comp_ids: tuple) -> pd.DataFrame:
                revenue_at_exit_usd_m, gross_margin_pct, ebitda_margin_pct,
                ev_revenue_multiple, data_confidence, key_narrative_drivers,
                revenue_growth_at_exit,
-               COALESCE(is_clean_exit, 1) AS is_clean_exit
+               COALESCE(is_clean_exit, 1)     AS is_clean_exit,
+               COALESCE(use_for_margins, 1)   AS use_for_margins,
+               COALESCE(use_for_multiples, 1) AS use_for_multiples
         FROM exit_comps WHERE comp_id IN ({ph})
     """, _comps_conn(), params=list(comp_ids))
 
@@ -515,21 +517,25 @@ def compute_comp_benchmarks(comps: pd.DataFrame) -> dict:
     hi = comps[comps["data_confidence"].str.lower().isin(["high", "medium"])] \
         if "data_confidence" in comps.columns else comps
 
-    # Restrict medians to completed exits only — excludes pre-exit funding marks
-    if "is_clean_exit" in hi.columns:
-        hi = hi[hi["is_clean_exit"] == 1]
+    def _subset(flag_col):
+        if flag_col in hi.columns:
+            return hi[hi[flag_col] == 1]
+        return hi
 
-    def _med(col, df=hi):
+    margins_df   = _subset("use_for_margins")
+    multiples_df = _subset("use_for_multiples")
+
+    def _med(col, df):
         v = df[col].dropna() if col in df.columns else pd.Series(dtype=float)
         return float(v.median()) if not v.empty else None
 
     return {
-        "gross_margin_pct":      _med("gross_margin_pct"),
-        "ebitda_margin_pct":     _med("ebitda_margin_pct"),
-        "ev_revenue_multiple":   _med("ev_revenue_multiple"),
-        "revenue_at_exit_usd_m": _med("revenue_at_exit_usd_m"),
+        "gross_margin_pct":      _med("gross_margin_pct",      margins_df),
+        "ebitda_margin_pct":     _med("ebitda_margin_pct",     margins_df),
+        "ev_revenue_multiple":   _med("ev_revenue_multiple",   multiples_df),
+        "revenue_at_exit_usd_m": _med("revenue_at_exit_usd_m", multiples_df),
         "n_total":   len(comps),
-        "n_hi_conf": len(hi),
+        "n_hi_conf": len(margins_df),
     }
 
 def compute_gap_analysis(
