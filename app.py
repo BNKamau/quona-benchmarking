@@ -2110,14 +2110,13 @@ def fetch_last_affinity_note_for_buyer(buyer_name: str, affinity_api_key: str) -
 # ── Yoco custom exit tab ──────────────────────────────────────────────────────
 
 def _render_yoco_exit_tab() -> None:
-    # ── Section 1: Exit Pathways ──────────────────────────────────────────────
-    st.markdown(
-        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
-        f"margin:20px 0 12px 0;letter-spacing:.3px'>Exit Pathways</div>",
-        unsafe_allow_html=True,
-    )
+    # ── Section 1: Exit Pathways (collapsed) ─────────────────────────────────
+    AMBER = "#FFC107"
+    GREEN_DOT = "#D5FA94"
+    RED_DOT = "#E57373"
+    EMPTY = "#D4D5CE"
 
-    def _pathway_card(title, valuation, feasibility_dots, tag, highlight=False):
+    def _pathway_card(title, valuation, description, feasibility_dots, tag, highlight=False):
         border_extra = "border-left:3px solid #D5FA94;" if highlight else ""
         dots_html = "".join(
             f"<span style='display:inline-block;width:10px;height:10px;border-radius:50%;"
@@ -2131,29 +2130,30 @@ def _render_yoco_exit_tab() -> None:
   <div style='font-size:14px;font-weight:700;color:#2C2C2A;margin-bottom:4px'>{title}</div>
   <div style='font-size:13px;color:#2C2C2A'>{valuation[0]}</div>
   {rev_line}
-  <div style='margin:8px 0 4px'>{dots_html}</div>
+  <div style='font-size:12px;color:#93A3A1;font-style:italic;margin:6px 0 8px'>{description}</div>
+  <div style='margin:4px 0 8px'>{dots_html}</div>
   <span style='font-size:11px;font-weight:600;color:{MUTED};background:#EFF0EA;
     border-radius:4px;padding:2px 7px'>{tag}</span>
 </div>"""
 
-    AMBER = "#FFC107"
-    GREEN_DOT = "#D5FA94"
-    RED_DOT = "#E57373"
-    EMPTY = "#D4D5CE"
-
     pathways = [
-        ("Remain Independent",    ["$150–300M"],                  [AMBER, AMBER, EMPTY],       "Unattractive strategically", False),
-        ("SME Bank Build",        ["$250–600M"],                  [AMBER, AMBER, EMPTY],       "Execution heavy",            False),
-        ("Strategic Sale Local",  ["$200–400M", "2–4x rev"],      [GREEN_DOT, GREEN_DOT, GREEN_DOT], "Most likely — 12–24 months", True),
-        ("Strategic Sale Global", ["$400–600M"],                  [RED_DOT, EMPTY, EMPTY],     "Low feasibility",            False),
+        ("Remain Independent",    ["$150–300M"],             "Protect brand and optionality but risk gradual erosion as banks and telcos consolidate.",
+         [AMBER, AMBER, EMPTY],             "Unattractive strategically", False),
+        ("SME Bank Build",        ["$250–600M"],             "Partner with Sava to launch SME accounts and credit, creating a stickier ecosystem narrative.",
+         [AMBER, AMBER, EMPTY],             "Execution heavy",            False),
+        ("Strategic Sale Local",  ["$200–400M", "2–4x rev"], "Sell to Vodacom, MTN, Capitec, FNB or insurers — most realistic path given consolidation wave.",
+         [GREEN_DOT, GREEN_DOT, GREEN_DOT], "Most likely — 12–24 months", True),
+        ("Strategic Sale Global", ["$400–600M"],             "Acquire by Stripe, Adyen or Nubank as Africa market entry — limited near-term appetite.",
+         [RED_DOT, EMPTY, EMPTY],           "Low feasibility",            False),
     ]
 
-    row1, row2 = st.columns(2), st.columns(2)
-    for idx, (title, val, dots, tag, highlight) in enumerate(pathways):
-        col = row1[idx] if idx < 2 else row2[idx - 2]
-        with col:
-            st.markdown(_pathway_card(title, val, dots, tag, highlight), unsafe_allow_html=True)
-            st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+    with st.expander("Exit Pathways — click to expand", expanded=False):
+        row1, row2 = st.columns(2), st.columns(2)
+        for idx, (title, val, desc, dots, tag, highlight) in enumerate(pathways):
+            col = row1[idx] if idx < 2 else row2[idx - 2]
+            with col:
+                st.markdown(_pathway_card(title, val, desc, dots, tag, highlight), unsafe_allow_html=True)
+                st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
@@ -2177,52 +2177,58 @@ def _render_yoco_exit_tab() -> None:
         return (f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:600;"
                 f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>")
 
-    def _buyer_row(name, fit, activity, rationale, key, affinity_cache):
-        cols = st.columns([2, 2, 3, 1, 2])
-        with cols[0]:
+    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0):
+        row_bg = "#EFF0EA" if row_idx % 2 == 0 else "#FFFFFF"
+        with st.container():
             st.markdown(
-                f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
-                f"{_fit_badge(fit)}</div>",
+                f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
                 unsafe_allow_html=True,
             )
-        with cols[1]:
-            st.markdown(
-                f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{activity}</div>",
-                unsafe_allow_html=True,
-            )
-        with cols[2]:
-            st.markdown(
-                f"<div style='font-size:13px;color:#2C2C2A;padding-top:6px'>{rationale}</div>",
-                unsafe_allow_html=True,
-            )
-        with cols[3]:
-            st.checkbox("Re-engage Q3?", key=key)
-        with cols[4]:
-            if affinity_cache is None:
+            cols = st.columns([2, 2, 3, 1, 2])
+            with cols[0]:
                 st.markdown(
-                    f"<div style='font-size:11px;color:{MUTED};padding-top:8px'>Sync Affinity above</div>",
+                    f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"{_fit_badge(fit)}</div>",
                     unsafe_allow_html=True,
                 )
-            else:
-                note = affinity_cache.get(name)
-                if note is None:
+            with cols[1]:
+                st.markdown(
+                    f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{activity}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[2]:
+                st.markdown(
+                    f"<div style='font-size:13px;color:#2C2C2A;padding-top:6px'>{rationale}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[3]:
+                st.checkbox("", key=key)
+            with cols[4]:
+                if affinity_cache is None:
                     st.markdown(
-                        f"<div style='font-size:11px;color:#B71C1C;padding-top:8px'>No recent contact</div>",
-                        unsafe_allow_html=True,
-                    )
-                elif note.get("stale"):
-                    st.markdown(
-                        f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
-                        f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
+                        f"<div style='font-size:11px;color:{MUTED};padding-top:8px'>Sync Affinity above</div>",
                         unsafe_allow_html=True,
                     )
                 else:
-                    st.markdown(
-                        f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
-                        f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
-                        unsafe_allow_html=True,
-                    )
-        st.markdown("<div style='height:4px;border-bottom:1px solid #EFF0EA;margin-bottom:4px'></div>", unsafe_allow_html=True)
+                    note = affinity_cache.get(name)
+                    if note is None:
+                        st.markdown(
+                            f"<div style='font-size:11px;color:{MUTED};font-style:italic;padding-top:8px'>Not in Affinity</div>",
+                            unsafe_allow_html=True,
+                        )
+                    elif note.get("stale"):
+                        st.markdown(
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            unsafe_allow_html=True,
+                        )
+            st.markdown("</div>", unsafe_allow_html=True)
 
     local_buyers = [
         ("Capitec",    "Very High", "Rapid SME banking rollout under new CEO",
@@ -2293,14 +2299,14 @@ def _render_yoco_exit_tab() -> None:
     tab_local, tab_global = st.tabs(["Local Buyers", "Global Buyers"])
     with tab_local:
         _header_row()
-        for name, fit, activity, rationale in local_buyers:
+        for idx, (name, fit, activity, rationale) in enumerate(local_buyers):
             key = "engage_yoco_" + name.replace(" ", "")
-            _buyer_row(name, fit, activity, rationale, key, affinity_cache)
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
     with tab_global:
         _header_row()
-        for name, fit, activity, rationale in global_buyers:
+        for idx, (name, fit, activity, rationale) in enumerate(global_buyers):
             key = "engage_yoco_" + name.replace(" ", "")
-            _buyer_row(name, fit, activity, rationale, key, affinity_cache)
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
