@@ -2036,6 +2036,59 @@ def classify_exit_relevant(interactions: list[dict]) -> list[dict]:
     return relevant
 
 
+# ── Yoco Affinity helper ──────────────────────────────────────────────────────
+
+def fetch_last_affinity_note_for_buyer(buyer_name: str, affinity_api_key: str) -> dict | None:
+    try:
+        import requests
+        AUTH = ("", affinity_api_key)
+        BASE = "https://api.affinity.co"
+
+        r = requests.get(f"{BASE}/organizations", params={"term": buyer_name}, auth=AUTH, timeout=15)
+        r.raise_for_status()
+        orgs = r.json().get("organizations", [])
+        if not orgs:
+            return None
+        org_id = orgs[0]["id"]
+
+        r = requests.get(f"{BASE}/notes", params={"organization_id": org_id}, auth=AUTH, timeout=15)
+        r.raise_for_status()
+        notes = r.json().get("notes", [])
+        if not notes:
+            return None
+
+        def _note_dt(n):
+            raw = n.get("created_at", "")
+            if not raw:
+                return datetime.min.replace(tzinfo=timezone.utc)
+            dt = datetime.fromisoformat(raw)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+        notes.sort(key=_note_dt, reverse=True)
+        latest = notes[0]
+
+        creator_name = "Unknown"
+        creator_id = latest.get("creator_id")
+        if creator_id:
+            try:
+                rp = requests.get(f"{BASE}/persons/{creator_id}", auth=AUTH, timeout=10)
+                p = rp.json()
+                creator_name = (f"{p.get('first_name', '')} {p.get('last_name', '')}".strip() or "Unknown")
+            except Exception:
+                pass
+
+        content = (latest.get("content") or "").strip()
+        raw_date = latest.get("created_at", "")
+        note_dt = datetime.fromisoformat(raw_date) if raw_date else None
+        return {
+            "date":         note_dt.strftime("%Y-%m-%d") if note_dt else "",
+            "creator_name": creator_name,
+            "snippet":      content[:120] + ("…" if len(content) > 120 else ""),
+        }
+    except Exception:
+        return None
+
+
 # ── Yoco custom exit tab ──────────────────────────────────────────────────────
 
 def _render_yoco_exit_tab() -> None:
@@ -2106,8 +2159,8 @@ def _render_yoco_exit_tab() -> None:
         return (f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:600;"
                 f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>")
 
-    def _buyer_row(name, fit, activity, rationale, key):
-        cols = st.columns([2, 2, 3, 1])
+    def _buyer_row(name, fit, activity, rationale, key, affinity_cache):
+        cols = st.columns([2, 2, 3, 1, 2])
         with cols[0]:
             st.markdown(
                 f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
@@ -2126,6 +2179,25 @@ def _render_yoco_exit_tab() -> None:
             )
         with cols[3]:
             st.checkbox("Re-engage Q3?", key=key)
+        with cols[4]:
+            if affinity_cache is None:
+                st.markdown(
+                    f"<div style='font-size:11px;color:{MUTED};padding-top:8px'>Sync Affinity above</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                note = affinity_cache.get(name)
+                if note:
+                    st.markdown(
+                        f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
+                        f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f"<div style='font-size:11px;color:#B71C1C;padding-top:8px'>No recent contact</div>",
+                        unsafe_allow_html=True,
+                    )
         st.markdown("<div style='height:4px;border-bottom:1px solid #EFF0EA;margin-bottom:4px'></div>", unsafe_allow_html=True)
 
     local_buyers = [
@@ -2168,15 +2240,28 @@ def _render_yoco_exit_tab() -> None:
          "Real-time merchant data overlap with existing bank and telco feeds."),
     ]
 
+    affinity_cache = st.session_state.get("yoco_affinity_data")
+    _, _sync_btn_col = st.columns([6, 1])
+    with _sync_btn_col:
+        if st.button("Sync Affinity", key="yoco_affinity_sync"):
+            _api_key = st.secrets.get("AFFINITY_API_KEY", "")
+            all_names = [b[0] for b in local_buyers] + [g[0] for g in global_buyers]
+            with st.spinner("Fetching Affinity data for all buyers…"):
+                st.session_state["yoco_affinity_data"] = {
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    for bname in all_names
+                }
+            st.rerun()
+
     tab_local, tab_global = st.tabs(["Local Buyers", "Global Buyers"])
     with tab_local:
         for name, fit, activity, rationale in local_buyers:
             key = "engage_yoco_" + name.replace(" ", "")
-            _buyer_row(name, fit, activity, rationale, key)
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache)
     with tab_global:
         for name, fit, activity, rationale in global_buyers:
             key = "engage_yoco_" + name.replace(" ", "")
-            _buyer_row(name, fit, activity, rationale, key)
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache)
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
