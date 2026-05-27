@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import anthropic
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from parsers.excel_parsers import PARSERS, SUPPORTED_COMPANIES
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -1796,6 +1796,134 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
         st.rerun()
 
 
+# ── Affinity CRM helpers ──────────────────────────────────────────────────────
+
+def fetch_affinity_interactions(company_name: str) -> list[dict]:
+    """Search Affinity for company_name, return notes from last 180 days."""
+    import requests
+
+    api_key = st.secrets.get("AFFINITY_API_KEY", "")
+    if not api_key:
+        raise ValueError("AFFINITY_API_KEY not set in .streamlit/secrets.toml")
+
+    BASE = "https://api.affinity.co"
+    AUTH = ("", api_key)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=180)
+
+    # Find org
+    r = requests.get(f"{BASE}/organizations", params={"term": company_name},
+                     auth=AUTH, timeout=15)
+    r.raise_for_status()
+    orgs = r.json().get("organizations", [])
+    if not orgs:
+        return []
+    org_id = orgs[0]["id"]
+
+    # Fetch notes
+    r = requests.get(f"{BASE}/notes", params={"organization_id": org_id},
+                     auth=AUTH, timeout=15)
+    r.raise_for_status()
+    notes = r.json().get("notes", [])
+
+    # Cache person names to minimise API calls
+    _person_cache: dict[int, str] = {}
+
+    def _person_name(pid: int) -> str:
+        if pid in _person_cache:
+            return _person_cache[pid]
+        try:
+            rp = requests.get(f"{BASE}/persons/{pid}", auth=AUTH, timeout=10)
+            p  = rp.json()
+            name = f"{p.get('first_name', '')} {p.get('last_name', '')}".strip()
+        except Exception:
+            name = str(pid)
+        _person_cache[pid] = name
+        return name
+
+    results = []
+    for n in notes:
+        raw_date = n.get("created_at", "")
+        if not raw_date:
+            continue
+        note_dt = datetime.fromisoformat(raw_date)
+        if note_dt.tzinfo is None:
+            note_dt = note_dt.replace(tzinfo=timezone.utc)
+        if note_dt < cutoff:
+            continue
+
+        creator_id = n.get("creator_id")
+        person_name = _person_name(creator_id) if creator_id else "Unknown"
+
+        itype = "Meeting" if n.get("is_meeting") else "Note"
+        content = (n.get("content") or "").strip()
+        summary = content[:600] + ("…" if len(content) > 600 else "")
+
+        results.append({
+            "date":        note_dt.strftime("%Y-%m-%d"),
+            "type":        itype,
+            "person_name": person_name,
+            "summary":     summary,
+        })
+
+    results.sort(key=lambda x: x["date"], reverse=True)
+    return results
+
+
+def classify_exit_relevant(interactions: list[dict]) -> list[dict]:
+    """Use Claude to filter interactions for exit signals and extract acquirer hints."""
+    if not interactions:
+        return []
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY environment variable not set")
+
+    import json as _json
+
+    interactions_text = _json.dumps(
+        [{"index": i, "date": x["date"], "type": x["type"],
+          "person": x["person_name"], "summary": x["summary"]}
+         for i, x in enumerate(interactions)],
+        indent=2,
+    )
+
+    prompt = (
+        "You are an M&A analyst at a venture capital firm. "
+        "Review the following CRM interactions and identify which ones contain "
+        "exit-relevant signals: acquisition, M&A, strategic partnership, exit, "
+        "buyer, valuation, term sheet, due diligence, secondary, strategic interest, "
+        "or any named potential acquirer or investor.\n\n"
+        f"Interactions:\n{interactions_text}\n\n"
+        "Return a JSON array of objects for ONLY the exit-relevant interactions. "
+        "Each object must have:\n"
+        "  - index (integer, matching the input index)\n"
+        "  - acquirer_hint (string: name of any buyer/acquirer/investor mentioned, "
+        "or empty string if none)\n\n"
+        "Return ONLY the JSON array, no other text."
+    )
+
+    client = anthropic.Anthropic(api_key=api_key)
+    msg = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = msg.content[0].text.strip()
+
+    import json as _json2
+    classified = _json2.loads(raw)
+
+    relevant = []
+    for item in classified:
+        idx = item.get("index")
+        if idx is None or idx >= len(interactions):
+            continue
+        entry = dict(interactions[idx])
+        entry["acquirer_hint"] = item.get("acquirer_hint", "")
+        relevant.append(entry)
+    return relevant
+
+
 # ── Exit Tracking tab ─────────────────────────────────────────────────────────
 
 def render_exit_tab(info: pd.Series, company_id: int) -> None:
@@ -1877,7 +2005,87 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
                                        new_lhood, new_timeline, new_notes)
                     st.rerun()
 
-    # ── Section 2: Buyer Universe ──────────────────────────────────────────────
+    # ── Section 2: Affinity CRM Sync ──────────────────────────────────────────
+    _sh("Affinity CRM Sync")
+
+    aff_key = f"affinity_results_{company_id}"
+    if aff_key not in st.session_state:
+        st.session_state[aff_key] = None
+
+    if st.button("Sync from Affinity", key=f"aff_sync_{company_id}"):
+        with st.spinner("Fetching interactions from Affinity…"):
+            try:
+                interactions = fetch_affinity_interactions(company_name)
+                relevant     = classify_exit_relevant(interactions)
+                st.session_state[aff_key] = {
+                    "total":    len(interactions),
+                    "relevant": relevant,
+                }
+            except Exception as exc:
+                st.error(f"Affinity sync failed: {exc}")
+
+    aff_data = st.session_state[aff_key]
+    if aff_data is not None:
+        total    = aff_data["total"]
+        relevant = aff_data["relevant"]
+        st.markdown(
+            f"<div style='font-size:13px;color:{MUTED};margin-bottom:12px'>"
+            f"{total} interactions found, {len(relevant)} exit-relevant "
+            f"in last 180 days</div>",
+            unsafe_allow_html=True,
+        )
+
+        # Auto-add acquirer hints to buyer universe
+        hints = [r["acquirer_hint"] for r in relevant if r.get("acquirer_hint")]
+        if hints:
+            buyers_df_now = _buyer_tracking_load(company_id)
+            existing_names = set(buyers_df_now["acquirer_name"].str.strip().str.lower())
+            added = []
+            for hint in hints:
+                if hint.strip().lower() not in existing_names:
+                    contact_date = next(
+                        (r["date"] for r in relevant if r.get("acquirer_hint") == hint), ""
+                    )
+                    new_row = pd.DataFrame([{
+                        "acquirer_name":      hint,
+                        "acquirer_type":      "Strategic",
+                        "relationship_owner": "",
+                        "last_contact_date":  contact_date,
+                        "status":             "Warm",
+                    }])
+                    buyers_df_now = pd.concat([buyers_df_now, new_row], ignore_index=True)
+                    existing_names.add(hint.strip().lower())
+                    added.append(hint)
+            if added:
+                _buyer_tracking_replace(company_id, buyers_df_now)
+                st.success(f"Auto-added to buyer universe: {', '.join(added)}")
+
+        # Show exit-relevant interactions
+        if relevant:
+            for item in relevant:
+                hint_badge = (
+                    f" · <span style='color:{BLUE};font-weight:600'>"
+                    f"{item['acquirer_hint']}</span>"
+                    if item.get("acquirer_hint") else ""
+                )
+                st.markdown(
+                    f"<div style='border-left:3px solid {BLUE};padding:8px 12px;"
+                    f"margin-bottom:8px;background:#F8FAFF;border-radius:0 4px 4px 0'>"
+                    f"<div style='font-size:11px;color:{MUTED};margin-bottom:3px'>"
+                    f"{item['date']} · {item['type']} · {item['person_name']}"
+                    f"{hint_badge}</div>"
+                    f"<div style='font-size:13px;color:{BLACK}'>{item['summary']}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown(
+                f"<div style='font-size:13px;color:{MUTED}'>No exit-relevant "
+                f"interactions found in last 180 days.</div>",
+                unsafe_allow_html=True,
+            )
+
+    # ── Section 3: Buyer Universe ──────────────────────────────────────────────
     _sh("Buyer Universe")
 
     buyers_df = _buyer_tracking_load(company_id)
