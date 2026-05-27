@@ -1808,7 +1808,6 @@ def fetch_affinity_interactions(company_name: str) -> list[dict]:
 
     BASE = "https://api.affinity.co"
     AUTH = ("", api_key)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=180)
 
     # Find org
     r = requests.get(f"{BASE}/organizations", params={"term": company_name},
@@ -1848,8 +1847,6 @@ def fetch_affinity_interactions(company_name: str) -> list[dict]:
         note_dt = datetime.fromisoformat(raw_date)
         if note_dt.tzinfo is None:
             note_dt = note_dt.replace(tzinfo=timezone.utc)
-        if note_dt < cutoff:
-            continue
 
         creator_id = n.get("creator_id")
         person_name = _person_name(creator_id) if creator_id else "Unknown"
@@ -2030,8 +2027,7 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
         relevant = aff_data["relevant"]
         st.markdown(
             f"<div style='font-size:13px;color:{MUTED};margin-bottom:12px'>"
-            f"{total} interactions found, {len(relevant)} exit-relevant "
-            f"in last 180 days</div>",
+            f"{total} interactions found, {len(relevant)} exit-relevant</div>",
             unsafe_allow_html=True,
         )
 
