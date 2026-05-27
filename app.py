@@ -130,7 +130,7 @@ _init_exit_tables()
 
 # ── Exit comps DB helpers ──────────────────────────────────────────────────────
 COMPS_DB = "data/quona_exit_comps.db"
-_COMP_NAME_MAP = {"Verto": "Verto FX"}  # benchmarking.db name → portfolio_comp_mapping name
+_COMP_NAME_MAP = {"VertoFX": "Verto FX"}  # benchmarking.db name → portfolio_comp_mapping name
 
 def _comps_conn():
     return sqlite3.connect(COMPS_DB, check_same_thread=False)

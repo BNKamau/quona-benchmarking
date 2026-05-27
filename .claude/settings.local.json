@@ -20,7 +20,8 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(sqlite3 benchmarking.db \"SELECT id, name FROM companies ORDER BY name;\")",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(git check-ignore *)"
     ]
   }
 }
