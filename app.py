@@ -688,6 +688,87 @@ def _no_data_box(msg: str = "No data") -> None:
         unsafe_allow_html=True,
     )
 
+# ── Affinity deal-intel scan ──────────────────────────────────────────────────
+
+_MA_KEYWORDS = [
+    "acquisition", "acquired", "m&a", "merger", "strategic", "term sheet",
+    "due diligence", "exit", "ipo", "valuation", "buyout", "transaction",
+    "deal close", "invest", "raise", "series",
+]
+
+def fetch_affinity_deal_intel(api_key: str) -> list[dict]:
+    import requests
+    AUTH   = ("", api_key)
+    BASE   = "https://api.affinity.co"
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=365)
+
+    _person_cache: dict[int, str] = {}
+
+    def _person_name(pid: int) -> str:
+        if pid in _person_cache:
+            return _person_cache[pid]
+        try:
+            r = requests.get(f"{BASE}/persons/{pid}", auth=AUTH, timeout=10)
+            p = r.json()
+            name = f"{p.get('first_name','').strip()} {p.get('last_name','').strip()}".strip()
+        except Exception:
+            name = str(pid)
+        _person_cache[pid] = name or str(pid)
+        return _person_cache[pid]
+
+    results  = []
+    page_token = None
+
+    while True:
+        params: dict = {"limit": 100}
+        if page_token:
+            params["page_token"] = page_token
+
+        r = requests.get(f"{BASE}/notes", params=params, auth=AUTH, timeout=20)
+        r.raise_for_status()
+        data  = r.json()
+        notes = data if isinstance(data, list) else data.get("notes", [])
+
+        for note in notes:
+            raw_date = note.get("created_at") or ""
+            if not raw_date:
+                continue
+            note_dt = datetime.fromisoformat(raw_date)
+            if note_dt.tzinfo is None:
+                note_dt = note_dt.replace(tzinfo=timezone.utc)
+            if note_dt < cutoff:
+                continue
+
+            content = (note.get("content") or "").strip()
+            content_lower = content.lower()
+            matched = [kw for kw in _MA_KEYWORDS if kw in content_lower]
+            if not matched:
+                continue
+
+            creator_id   = note.get("creator_id")
+            creator_name = _person_name(creator_id) if creator_id else "Unknown"
+
+            results.append({
+                "date":             note_dt.strftime("%Y-%m-%d"),
+                "creator_name":     creator_name,
+                "snippet":          content[:200] + ("…" if len(content) > 200 else ""),
+                "matched_keywords": matched,
+            })
+
+        # Pagination — Affinity uses next_page_token or paging dict
+        next_token = (
+            data.get("next_page_token")
+            if isinstance(data, dict)
+            else None
+        )
+        if not next_token or isinstance(data, list):
+            break
+        page_token = next_token
+
+    results.sort(key=lambda x: x["date"], reverse=True)
+    return results
+
+
 # ── Benchmarking tab renderer ─────────────────────────────────────────────────
 def render_benchmarking_tab(
     info: pd.Series,
@@ -1473,6 +1554,155 @@ def render_benchmarking_tab(
         f"</div>",
         unsafe_allow_html=True,
     )
+
+    # ── Yoco: Affinity deal intelligence scan ────────────────────────────────────
+    if company_name == "Yoco":
+        st.markdown(
+            f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
+            f"color:{MUTED};font-weight:600;margin:24px 0 12px'>Deal Intelligence — Affinity Scan</div>",
+            unsafe_allow_html=True,
+        )
+
+        PILL_COLORS = [
+            "#C5E5FF", "#D5FA94", "#FFE0B2", "#F8BBD9", "#D4D5CE",
+            "#B2EBF2", "#E1BEE7", "#DCEDC8", "#FFF9C4", "#FFCCBC",
+        ]
+
+        def _kw_pills(keywords: list[str]) -> str:
+            html = ""
+            for i, kw in enumerate(keywords):
+                bg = PILL_COLORS[i % len(PILL_COLORS)]
+                html += (
+                    f"<span style='background:{bg};color:{BLACK};font-size:10px;"
+                    f"font-weight:600;border-radius:4px;padding:1px 6px;"
+                    f"margin-right:3px;white-space:nowrap'>{kw}</span>"
+                )
+            return html
+
+        if st.button("Scan Affinity for M&A Intel", key="yoco_affinity_ma_scan"):
+            try:
+                _api_key = st.secrets.get("AFFINITY_API_KEY", "")
+                if not _api_key:
+                    st.warning("AFFINITY_API_KEY not set in secrets.toml")
+                else:
+                    with st.spinner("Scanning all Affinity notes for M&A signals…"):
+                        st.session_state["affinity_deal_intel"] = fetch_affinity_deal_intel(_api_key)
+            except Exception as exc:
+                st.error(f"Affinity scan failed: {exc}")
+
+        intel = st.session_state.get("affinity_deal_intel")
+        if intel is not None:
+            if intel:
+                st.markdown(
+                    f"<div style='font-size:12px;color:{MUTED};margin-bottom:12px'>"
+                    f"Found <b style='color:{BLACK}'>{len(intel)}</b> notes with M&A signals "
+                    f"across Affinity in the last 365 days.</div>",
+                    unsafe_allow_html=True,
+                )
+
+                # Column headers
+                hdr_style = (
+                    f"font-size:10px;font-weight:700;color:#93A3A1;"
+                    f"text-transform:uppercase;letter-spacing:.5px;padding-bottom:4px"
+                )
+                hcols = st.columns([1, 1, 2, 3, 1])
+                for hc, lbl in zip(hcols, ["Date", "Author", "Keywords", "Snippet", "Action"]):
+                    with hc:
+                        st.markdown(f"<div style='{hdr_style}'>{lbl}</div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div style='height:2px;background:{BORDER};margin-bottom:8px'></div>",
+                    unsafe_allow_html=True,
+                )
+
+                for i, note in enumerate(intel):
+                    row_bg = "#EFF0EA" if i % 2 == 0 else WHITE
+                    with st.container():
+                        st.markdown(
+                            f"<div style='background:{row_bg};border-radius:6px;padding:4px 2px'>",
+                            unsafe_allow_html=True,
+                        )
+                        rcols = st.columns([1, 1, 2, 3, 1])
+                        with rcols[0]:
+                            st.markdown(
+                                f"<div style='font-size:12px;color:{BLACK};padding-top:6px'>"
+                                f"{note['date']}</div>",
+                                unsafe_allow_html=True,
+                            )
+                        with rcols[1]:
+                            st.markdown(
+                                f"<div style='font-size:12px;color:{MUTED};padding-top:6px'>"
+                                f"{note['creator_name']}</div>",
+                                unsafe_allow_html=True,
+                            )
+                        with rcols[2]:
+                            st.markdown(
+                                f"<div style='padding-top:4px'>{_kw_pills(note['matched_keywords'])}</div>",
+                                unsafe_allow_html=True,
+                            )
+                        with rcols[3]:
+                            st.markdown(
+                                f"<div style='font-size:12px;color:{BLACK};padding-top:6px;"
+                                f"line-height:1.4'>{note['snippet'][:150]}"
+                                f"{'…' if len(note['snippet']) > 150 else ''}</div>",
+                                unsafe_allow_html=True,
+                            )
+                        with rcols[4]:
+                            if st.button("+ Add comp", key=f"add_comp_intel_{i}"):
+                                st.session_state[f"add_comp_open_{i}"] = True
+                        st.markdown("</div>", unsafe_allow_html=True)
+
+                    if st.session_state.get(f"add_comp_open_{i}"):
+                        with st.form(key=f"add_comp_form_{i}"):
+                            st.markdown(
+                                f"<div style='font-size:12px;font-weight:600;color:{BLACK};"
+                                f"margin-bottom:8px'>Add company as comp</div>",
+                                unsafe_allow_html=True,
+                            )
+                            fc1, fc2, fc3, fc4 = st.columns(4)
+                            with fc1:
+                                new_name = st.text_input("Company name", key=f"ci_name_{i}")
+                            with fc2:
+                                new_exit_type = st.selectbox(
+                                    "Exit type", ["Acquisition", "IPO", "Private Funding"],
+                                    key=f"ci_exit_{i}",
+                                )
+                            with fc3:
+                                new_rev = st.number_input(
+                                    "Revenue at exit ($M)", min_value=0.0, step=1.0, key=f"ci_rev_{i}"
+                                )
+                            with fc4:
+                                new_mult = st.number_input(
+                                    "EV/Rev multiple", min_value=0.0, step=0.1, key=f"ci_mult_{i}"
+                                )
+                            if st.form_submit_button("Insert into exit_comps"):
+                                try:
+                                    _conn_comps = sqlite3.connect(
+                                        "data/quona_exit_comps.db", check_same_thread=False
+                                    )
+                                    now_iso = datetime.utcnow().isoformat()
+                                    _conn_comps.execute(
+                                        """INSERT INTO exit_comps
+                                           (company_name, exit_type, revenue_at_exit_usd_m,
+                                            ev_revenue_multiple, data_source, created_at, updated_at)
+                                           VALUES (?,?,?,?,?,?,?)""",
+                                        (new_name, new_exit_type,
+                                         new_rev if new_rev > 0 else None,
+                                         new_mult if new_mult > 0 else None,
+                                         "Affinity Intel", now_iso, now_iso),
+                                    )
+                                    _conn_comps.commit()
+                                    _conn_comps.close()
+                                    st.success(f"Added {new_name} to exit_comps.")
+                                    st.session_state.pop(f"add_comp_open_{i}", None)
+                                    st.rerun()
+                                except Exception as exc:
+                                    st.error(f"Insert failed: {exc}")
+            else:
+                st.markdown(
+                    f"<div style='font-size:13px;color:{MUTED};font-style:italic'>"
+                    f"No M&A signals found in Affinity notes from the last 365 days.</div>",
+                    unsafe_allow_html=True,
+                )
 
     # ── Mapping rationale expander ─────────────────────────────────────────────
     with st.expander("Why these comps? (mapping rationale)"):
