@@ -107,6 +107,9 @@ st.markdown(f"""
       background: #EFF0EA !important;
   }}
 
+  /* Suppress spell-check red underlines in markdown containers */
+  div[data-testid="stMarkdownContainer"] {{ -webkit-user-modify: read-only; }}
+
   /* Filter radio spacing */
   div[data-testid="stRadio"] {{ margin-bottom: 0px !important; margin-top: 0px !important; }}
 
@@ -3304,11 +3307,11 @@ if st.session_state.page == "home":
             ltm_tpv = row.get("ltm_tpv_usd")
             ltm_gmv = row.get("ltm_gmv_usd")
             if not _is_null(ltm_tpv):
-                tpv, tpv_lbl = ltm_tpv, "LTM TPV"
+                tpv, tpv_lbl = ltm_tpv, "ANNUAL TPV"
             elif not _is_null(ltm_gmv):
-                tpv, tpv_lbl = ltm_gmv, "LTM GMV"
+                tpv, tpv_lbl = ltm_gmv, "ANNUAL GMV"
             else:
-                tpv, tpv_lbl = None, "LTM TPV"
+                tpv, tpv_lbl = None, "ANNUAL TPV"
             return (
                 (tpv_lbl,     fmt_usd(tpv),  BLACK),
                 ("EBITDA Mgn", fmt_pct(row.get("ltm_ebitda_margin_pct") or row.get("ebitda_margin_pct")),
@@ -3343,12 +3346,15 @@ if st.session_state.page == "home":
         # LTM revenue
         rev_str = fmt_usd(ltm_val)
         if ltm_lbl == "LTM":
-            basis   = "12 mo." if pt == "monthly" else "4 qtrs." if pt == "quarterly" else "annual"
-            rev_sub = f"LTM · {basis}"
+            basis     = "12 mo." if pt == "monthly" else "4 qtrs." if pt == "quarterly" else "annual"
+            rev_sub   = f"LTM · {basis}"
+            rev_label = "LTM REVENUE"
         elif ltm_lbl == "ARR (est.)":
-            rev_sub = "ARR (est.)"
+            rev_sub   = "ARR (est.)"
+            rev_label = "ARR REVENUE (EST.)"
         else:
-            rev_sub = ""
+            rev_sub   = ""
+            rev_label = "REVENUE"
         if period_lbl and not _is_null(ltm_val):
             rev_str = f"{rev_str} ({period_lbl})"
 
@@ -3416,7 +3422,7 @@ if st.session_state.page == "home":
                 with m1:
                     st.markdown(
                         f"<div style='{_MPAD}'>"
-                        f"<div style='{_MLBL}'>LTM Revenue</div>"
+                        f"<div style='{_MLBL}'>{rev_label}</div>"
                         f"<div style='{_MVAL};color:{BLACK}'>{rev_str}</div>"
                         f"<div style='{_MSUB}'>{rev_sub}</div>"
                         f"</div>",
