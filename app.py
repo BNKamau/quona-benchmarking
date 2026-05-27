@@ -77,6 +77,52 @@ DB_PATH = "benchmarking.db"
 def _conn():
     return sqlite3.connect(DB_PATH, check_same_thread=False)
 
+def _init_exit_tables() -> None:
+    conn = _conn()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS exit_pathways (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id         INTEGER NOT NULL,
+            pathway_name       TEXT    NOT NULL,
+            likelihood         TEXT    DEFAULT 'Exploratory',
+            estimated_timeline TEXT,
+            notes              TEXT,
+            created_at         TEXT,
+            updated_at         TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS buyer_tracking (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id         INTEGER NOT NULL,
+            acquirer_name      TEXT    NOT NULL,
+            acquirer_type      TEXT    DEFAULT 'Strategic',
+            relationship_owner TEXT,
+            last_contact_date  TEXT,
+            status             TEXT    DEFAULT 'Not Started',
+            sort_order         INTEGER DEFAULT 0,
+            created_at         TEXT,
+            updated_at         TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS quarterly_actions (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id        INTEGER NOT NULL,
+            quarter           TEXT    NOT NULL,
+            planned_actions   TEXT    DEFAULT '',
+            completed_actions TEXT    DEFAULT '',
+            carry_forward     TEXT    DEFAULT '',
+            created_at        TEXT,
+            updated_at        TEXT,
+            UNIQUE(company_id, quarter)
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+_init_exit_tables()
+
 # ── Exit comps DB helpers ──────────────────────────────────────────────────────
 COMPS_DB = "data/quona_exit_comps.db"
 _COMP_NAME_MAP = {"Verto": "Verto FX"}  # benchmarking.db name → portfolio_comp_mapping name
@@ -1280,6 +1326,207 @@ def _upsert_kpi(company_id: int, data: dict) -> None:
     conn.close()
 
 
+# ── Exit tracking DB helpers ──────────────────────────────────────────────────
+
+def _exit_pathways_load(company_id: int) -> list[dict]:
+    rows = _conn().execute(
+        "SELECT id, pathway_name, likelihood, estimated_timeline, notes "
+        "FROM exit_pathways WHERE company_id=? ORDER BY id",
+        (company_id,),
+    ).fetchall()
+    return [{"id": r[0], "pathway_name": r[1], "likelihood": r[2],
+             "estimated_timeline": r[3], "notes": r[4]} for r in rows]
+
+
+def _exit_pathway_save(company_id: int, pid, name: str, likelihood: str,
+                       timeline: str, notes: str) -> None:
+    conn = _conn()
+    now  = datetime.utcnow().isoformat()
+    if pid:
+        conn.execute(
+            "UPDATE exit_pathways SET pathway_name=?,likelihood=?,"
+            "estimated_timeline=?,notes=?,updated_at=? WHERE id=?",
+            (name, likelihood, timeline, notes, now, pid),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO exit_pathways "
+            "(company_id,pathway_name,likelihood,estimated_timeline,notes,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (company_id, name, likelihood, timeline, notes, now, now),
+        )
+    conn.commit()
+    conn.close()
+
+
+def _exit_pathway_delete(pid: int) -> None:
+    conn = _conn()
+    conn.execute("DELETE FROM exit_pathways WHERE id=?", (pid,))
+    conn.commit()
+    conn.close()
+
+
+def _buyer_tracking_load(company_id: int) -> pd.DataFrame:
+    return pd.read_sql_query(
+        "SELECT id, acquirer_name, acquirer_type, relationship_owner, "
+        "last_contact_date, status FROM buyer_tracking "
+        "WHERE company_id=? ORDER BY sort_order, id",
+        _conn(), params=(company_id,),
+    )
+
+
+def _buyer_tracking_replace(company_id: int, df: pd.DataFrame) -> None:
+    conn = _conn()
+    now  = datetime.utcnow().isoformat()
+    conn.execute("DELETE FROM buyer_tracking WHERE company_id=?", (company_id,))
+    for i, row in df.iterrows():
+        name = str(row.get("acquirer_name", "")).strip()
+        if not name:
+            continue
+        conn.execute(
+            "INSERT INTO buyer_tracking "
+            "(company_id,acquirer_name,acquirer_type,relationship_owner,"
+            "last_contact_date,status,sort_order,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (company_id, name,
+             str(row.get("acquirer_type", "Strategic")),
+             str(row.get("relationship_owner", "") or ""),
+             str(row.get("last_contact_date", "") or ""),
+             str(row.get("status", "Not Started")),
+             i, now, now),
+        )
+    conn.commit()
+    conn.close()
+
+
+def _quarterly_actions_load(company_id: int, quarter: str) -> dict:
+    row = _conn().execute(
+        "SELECT planned_actions, completed_actions, carry_forward "
+        "FROM quarterly_actions WHERE company_id=? AND quarter=?",
+        (company_id, quarter),
+    ).fetchone()
+    return {
+        "planned_actions":   (row[0] or "") if row else "",
+        "completed_actions": (row[1] or "") if row else "",
+        "carry_forward":     (row[2] or "") if row else "",
+    }
+
+
+def _quarterly_actions_save(company_id: int, quarter: str,
+                             planned: str, completed: str, carry: str) -> None:
+    conn = _conn()
+    now  = datetime.utcnow().isoformat()
+    exists = conn.execute(
+        "SELECT id FROM quarterly_actions WHERE company_id=? AND quarter=?",
+        (company_id, quarter),
+    ).fetchone()
+    if exists:
+        conn.execute(
+            "UPDATE quarterly_actions SET planned_actions=?,completed_actions=?,"
+            "carry_forward=?,updated_at=? WHERE company_id=? AND quarter=?",
+            (planned, completed, carry, now, company_id, quarter),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO quarterly_actions "
+            "(company_id,quarter,planned_actions,completed_actions,carry_forward,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (company_id, quarter, planned, completed, carry, now, now),
+        )
+    conn.commit()
+    conn.close()
+
+
+# ── Exit tab suggestion helpers ───────────────────────────────────────────────
+
+_PATHWAY_DEFAULTS = [
+    ("Strategic Acquisition",  "Exploratory", "3–5 years"),
+    ("PE / Growth Equity",     "Exploratory", "2–4 years"),
+    ("IPO / Public Listing",   "Exploratory", "5–7 years"),
+]
+
+_SECTOR_BUYERS: dict[str, list[tuple[str, str]]] = {
+    "payments":         [("Pan-African Banking Group",     "Strategic"),
+                         ("Global Payments Network",       "Strategic"),
+                         ("African Fintech Consolidator",  "Strategic"),
+                         ("Growth Equity Fund",            "Financial")],
+    "lending":          [("Tier 1 African Bank",           "Strategic"),
+                         ("Development Finance (DFI)",     "Financial"),
+                         ("Pan-African Fintech Group",     "Strategic"),
+                         ("PE / Growth Fund",              "Financial")],
+    "wealth_management":[("Regional Asset Manager",        "Strategic"),
+                         ("Pan-African Bank (Wealth Arm)", "Strategic"),
+                         ("Global EM Investment Manager",  "Financial")],
+    "marketplace":      [("African B2B Platform",          "Strategic"),
+                         ("Global Marketplace Operator",   "Adjacent"),
+                         ("Regional PE Fund",              "Financial")],
+    "iot_infrastructure":[("Global IoT / Connectivity Co","Strategic"),
+                          ("Pan-African Telco Group",      "Strategic"),
+                          ("Infrastructure PE Fund",       "Financial")],
+    "saas":             [("Global Vertical SaaS Co",       "Strategic"),
+                         ("African Tech Conglomerate",     "Adjacent"),
+                         ("Growth Equity (SaaS)",          "Financial")],
+    "insurtech":        [("Pan-African Insurance Group",   "Strategic"),
+                         ("Global Insurtech Player",       "Adjacent"),
+                         ("PE / Growth Fund",              "Financial")],
+}
+
+
+def _suggest_exit_pathways(company_name: str, sector: str) -> list[dict]:
+    TYPE_KEYS = {
+        "strategic": ("Strategic Acquisition", "3–5 years"),
+        "acqui":     ("Strategic Acquisition", "3–5 years"),
+        "ipo":        ("IPO / Public Listing",  "5–7 years"),
+        "public":     ("IPO / Public Listing",  "5–7 years"),
+        "pe":         ("PE / Growth Equity",    "2–4 years"),
+        "growth":     ("PE / Growth Equity",    "2–4 years"),
+        "financial":  ("PE / Growth Equity",    "2–4 years"),
+    }
+    seen: dict[str, int] = {}
+    try:
+        mapping = load_comp_mapping(company_name)
+        if not mapping.empty:
+            comps = load_comps_detail(tuple(mapping["comp_id"].tolist()))
+            if not comps.empty and "exit_type" in comps.columns:
+                for et in comps["exit_type"].dropna():
+                    for key, (name, _) in TYPE_KEYS.items():
+                        if key in str(et).lower():
+                            seen[name] = seen.get(name, 0) + 1
+                            break
+    except Exception:
+        pass
+
+    suggestions = []
+    timelines   = {n: t for _, (n, t) in TYPE_KEYS.items()}
+    for name, count in sorted(seen.items(), key=lambda x: -x[1]):
+        suggestions.append({
+            "pathway_name":       name,
+            "likelihood":         "Exploratory",
+            "estimated_timeline": timelines.get(name, "3–5 years"),
+            "notes":              f"{count} comp(s) exited via this route",
+        })
+    for name, timeline, _ in _PATHWAY_DEFAULTS:
+        if name not in {s["pathway_name"] for s in suggestions}:
+            suggestions.append({
+                "pathway_name": name, "likelihood": "Exploratory",
+                "estimated_timeline": timeline, "notes": "",
+            })
+        if len(suggestions) >= 3:
+            break
+    return suggestions[:3]
+
+
+def _suggest_buyers(sector: str) -> list[dict]:
+    rows = _SECTOR_BUYERS.get(sector, [
+        ("Strategic Acquirer (TBD)", "Strategic"),
+        ("Financial Sponsor",        "Financial"),
+        ("Adjacent Market Player",   "Adjacent"),
+    ])
+    return [{"acquirer_name": n, "acquirer_type": t,
+             "relationship_owner": "", "last_contact_date": "",
+             "status": "Not Started"} for n, t in rows]
+
+
 def _generate_commentary(
     company_name: str,
     sector: str,
@@ -1538,6 +1785,164 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
         st.session_state.pop(ss_fkey, None)
         st.cache_data.clear()
         st.rerun()
+
+
+# ── Exit Tracking tab ─────────────────────────────────────────────────────────
+
+def render_exit_tab(info: pd.Series, company_id: int) -> None:
+    company_name = info["name"]
+    sector       = str(info.get("sector", "")).lower()
+    _today       = datetime.utcnow()
+    cur_q        = f"Q{(_today.month - 1) // 3 + 1} {_today.year}"
+
+    LIKELIHOOD_OPTS = ["Exploratory", "Active", "Advanced", "On Hold"]
+    STATUS_OPTS     = ["Not Started", "Warm", "Active", "Passed"]
+    TYPE_OPTS       = ["Strategic", "Financial", "Adjacent"]
+
+    LIKELIHOOD_COLORS = {
+        "Exploratory": (BLUE,      "#1565C0"),
+        "Active":      (GREEN,     "#2E7D32"),
+        "Advanced":    ("#D1FAE5", "#065F46"),
+        "On Hold":     ("#F5F5F5", MUTED),
+    }
+
+    def _sh(text):
+        st.markdown(
+            f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+            f"margin:20px 0 12px 0;letter-spacing:.3px'>{text}</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── Section 1: Exit Pathways ───────────────────────────────────────────────
+    _sh("Exit Pathways")
+
+    pathways = _exit_pathways_load(company_id)
+    if not pathways:
+        for pw in _suggest_exit_pathways(company_name, sector):
+            _exit_pathway_save(company_id, None, pw["pathway_name"],
+                               pw["likelihood"], pw["estimated_timeline"], pw["notes"])
+        pathways = _exit_pathways_load(company_id)
+
+    for pw in pathways:
+        pid   = pw["id"]
+        lhood = pw["likelihood"] if pw["likelihood"] in LIKELIHOOD_OPTS else "Exploratory"
+        badge_bg, badge_fg = LIKELIHOOD_COLORS.get(lhood, (BLUE, "#1565C0"))
+
+        with st.container(border=True):
+            st.markdown(
+                f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:6px'>"
+                f"<span style='font-size:15px;font-weight:600;color:{BLACK}'>"
+                f"{pw['pathway_name']}</span>"
+                f"<span style='background:{badge_bg};color:{badge_fg};border-radius:4px;"
+                f"padding:2px 8px;font-size:11px;font-weight:600'>{lhood}</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            with st.form(f"pw_{company_id}_{pid}", clear_on_submit=False):
+                c1, c2, c3 = st.columns([3, 2, 2])
+                name       = c1.text_input("Pathway name",  value=pw["pathway_name"])
+                likelihood = c2.selectbox("Likelihood",     LIKELIHOOD_OPTS,
+                                          index=LIKELIHOOD_OPTS.index(lhood))
+                timeline   = c3.text_input("Est. timeline", value=pw["estimated_timeline"] or "",
+                                            placeholder="e.g. 3–5 years")
+                notes = st.text_area("Notes", value=pw["notes"] or "", height=80,
+                                     placeholder="Context, conditions, next steps…")
+                bs, bd, _ = st.columns([1, 1, 6])
+                if bs.form_submit_button("Save",   use_container_width=True):
+                    _exit_pathway_save(company_id, pid, name, likelihood, timeline, notes)
+                    st.rerun()
+                if bd.form_submit_button("Delete", use_container_width=True):
+                    _exit_pathway_delete(pid)
+                    st.rerun()
+
+    with st.expander("＋ Add pathway"):
+        with st.form(f"add_pw_{company_id}", clear_on_submit=True):
+            c1, c2, c3 = st.columns([3, 2, 2])
+            new_name     = c1.text_input("Pathway name",  placeholder="e.g. Strategic Acquisition")
+            new_lhood    = c2.selectbox("Likelihood",     LIKELIHOOD_OPTS)
+            new_timeline = c3.text_input("Est. timeline", placeholder="e.g. 3–5 years")
+            new_notes    = st.text_area("Notes", height=80)
+            if st.form_submit_button("Add pathway"):
+                if new_name.strip():
+                    _exit_pathway_save(company_id, None, new_name.strip(),
+                                       new_lhood, new_timeline, new_notes)
+                    st.rerun()
+
+    # ── Section 2: Buyer Universe ──────────────────────────────────────────────
+    _sh("Buyer Universe")
+
+    buyers_df = _buyer_tracking_load(company_id)
+    if buyers_df.empty:
+        seed = pd.DataFrame(_suggest_buyers(sector))
+        _buyer_tracking_replace(company_id, seed)
+        buyers_df = _buyer_tracking_load(company_id)
+
+    display_cols = ["acquirer_name", "acquirer_type", "relationship_owner",
+                    "last_contact_date", "status"]
+    display_df = (
+        buyers_df[display_cols].copy()
+        if all(c in buyers_df.columns for c in display_cols)
+        else pd.DataFrame(columns=display_cols)
+    )
+
+    with st.form(f"buyer_form_{company_id}"):
+        edited = st.data_editor(
+            display_df,
+            column_config={
+                "acquirer_name":      st.column_config.TextColumn(
+                    "Acquirer", width="large"),
+                "acquirer_type":      st.column_config.SelectboxColumn(
+                    "Type", options=TYPE_OPTS, width="small"),
+                "relationship_owner": st.column_config.TextColumn(
+                    "Relationship Owner", width="medium"),
+                "last_contact_date":  st.column_config.TextColumn(
+                    "Last Contact", width="small",
+                    help="Format: YYYY-MM-DD or free text"),
+                "status":             st.column_config.SelectboxColumn(
+                    "Status", options=STATUS_OPTS, width="small"),
+            },
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+        )
+        if st.form_submit_button("Save buyer universe"):
+            _buyer_tracking_replace(company_id, edited)
+            st.success("Buyer universe saved.")
+            st.rerun()
+
+    # ── Section 3: Quarterly Actions ──────────────────────────────────────────
+    _sh(f"Quarterly Actions — {cur_q}")
+
+    qa = _quarterly_actions_load(company_id, cur_q)
+
+    with st.container(border=True):
+        with st.form(f"qa_{company_id}_{cur_q.replace(' ', '_')}"):
+            c1, c2, c3 = st.columns(3)
+            col_cfg = [
+                (c1, "Planned Actions",   "planned_actions",   "Actions planned for this quarter…"),
+                (c2, "Completed",         "completed_actions", "Actions completed this quarter…"),
+                (c3, "Carry Forward",     "carry_forward",     "Items to carry into next quarter…"),
+            ]
+            text_vals = {}
+            for col, hdr, key, ph in col_cfg:
+                with col:
+                    st.markdown(
+                        f"<div style='font-size:12px;font-weight:600;color:{BLACK};"
+                        f"margin-bottom:6px'>{hdr}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    text_vals[key] = st.text_area(
+                        hdr, value=qa[key], height=200,
+                        label_visibility="collapsed", placeholder=ph,
+                    )
+            if st.form_submit_button("Save actions", use_container_width=False):
+                _quarterly_actions_save(
+                    company_id, cur_q,
+                    text_vals["planned_actions"],
+                    text_vals["completed_actions"],
+                    text_vals["carry_forward"],
+                )
+                st.success("Actions saved.")
 
 
 # ── Session state ─────────────────────────────────────────────────────────────
@@ -1878,11 +2283,12 @@ elif st.session_state.page == "detail":
     m6.metric("History", f"{len(kpis)} periods  ·  {date_range}")
 
     _has_upload = info["name"] in SUPPORTED_COMPANIES
-    _tab_names  = ["Performance", "Benchmarking"] + (["Upload Data"] if _has_upload else [])
+    _tab_names  = ["Performance", "Benchmarking", "Exit Tracking"] + (["Upload Data"] if _has_upload else [])
     _tabs       = st.tabs(_tab_names)
     tab_perf    = _tabs[0]
     tab_bench   = _tabs[1]
-    tab_upload  = _tabs[2] if _has_upload else None
+    tab_exit    = _tabs[2]
+    tab_upload  = _tabs[3] if _has_upload else None
 
     with tab_perf:
         # ── Chart palette ─────────────────────────────────────────────────────
@@ -2171,6 +2577,9 @@ elif st.session_state.page == "detail":
 
     with tab_bench:
         render_benchmarking_tab(info, kpis, ltm_val, ltm_lbl, ltm_gm_pct, ltm_em_pct)
+
+    with tab_exit:
+        render_exit_tab(info, company_id)
 
     if tab_upload is not None:
         with tab_upload:
