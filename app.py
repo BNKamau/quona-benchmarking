@@ -2036,6 +2036,216 @@ def classify_exit_relevant(interactions: list[dict]) -> list[dict]:
     return relevant
 
 
+# ── Yoco custom exit tab ──────────────────────────────────────────────────────
+
+def _render_yoco_exit_tab() -> None:
+    # ── Section 1: Exit Pathways ──────────────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 12px 0;letter-spacing:.3px'>Exit Pathways</div>",
+        unsafe_allow_html=True,
+    )
+
+    def _pathway_card(title, valuation, feasibility_dots, tag, highlight=False):
+        border_extra = "border-left:3px solid #D5FA94;" if highlight else ""
+        dots_html = "".join(
+            f"<span style='display:inline-block;width:10px;height:10px;border-radius:50%;"
+            f"background:{d};margin-right:3px'></span>"
+            for d in feasibility_dots
+        )
+        rev_line = f"<div style='font-size:12px;color:{MUTED};margin-top:2px'>{valuation[1]}</div>" if len(valuation) > 1 else ""
+        return f"""
+<div style='background:#FFFFFF;border:1px solid #D4D5CE;{border_extra}border-radius:8px;
+     padding:16px;height:100%'>
+  <div style='font-size:14px;font-weight:700;color:#2C2C2A;margin-bottom:4px'>{title}</div>
+  <div style='font-size:13px;color:#2C2C2A'>{valuation[0]}</div>
+  {rev_line}
+  <div style='margin:8px 0 4px'>{dots_html}</div>
+  <span style='font-size:11px;font-weight:600;color:{MUTED};background:#EFF0EA;
+    border-radius:4px;padding:2px 7px'>{tag}</span>
+</div>"""
+
+    AMBER = "#FFC107"
+    GREEN_DOT = "#D5FA94"
+    RED_DOT = "#E57373"
+    EMPTY = "#D4D5CE"
+
+    pathways = [
+        ("Remain Independent",    ["$150–300M"],                  [AMBER, AMBER, EMPTY],       "Unattractive strategically", False),
+        ("SME Bank Build",        ["$250–600M"],                  [AMBER, AMBER, EMPTY],       "Execution heavy",            False),
+        ("Strategic Sale Local",  ["$200–400M", "2–4x rev"],      [GREEN_DOT, GREEN_DOT, GREEN_DOT], "Most likely — 12–24 months", True),
+        ("Strategic Sale Global", ["$400–600M"],                  [RED_DOT, EMPTY, EMPTY],     "Low feasibility",            False),
+    ]
+
+    row1, row2 = st.columns(2), st.columns(2)
+    for idx, (title, val, dots, tag, highlight) in enumerate(pathways):
+        col = row1[idx] if idx < 2 else row2[idx - 2]
+        with col:
+            st.markdown(_pathway_card(title, val, dots, tag, highlight), unsafe_allow_html=True)
+            st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 2: Acquirer Universe ─────────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 12px 0;letter-spacing:.3px'>Acquirer Universe — Prioritized</div>",
+        unsafe_allow_html=True,
+    )
+
+    FIT_COLORS = {
+        "Very High":   ("#D5FA94", "#2C2C2A"),
+        "High":        ("#C5E5FF", "#1565C0"),
+        "Medium":      ("#D4D5CE", "#2C2C2A"),
+        "Low-Medium":  ("#FFCDD2", "#B71C1C"),
+        "Low":         ("#FFCDD2", "#B71C1C"),
+    }
+
+    def _fit_badge(fit):
+        bg, fg = FIT_COLORS.get(fit, ("#D4D5CE", "#2C2C2A"))
+        return (f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:600;"
+                f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>")
+
+    def _buyer_row(name, fit, activity, rationale, key):
+        cols = st.columns([2, 2, 3, 1])
+        with cols[0]:
+            st.markdown(
+                f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                f"{_fit_badge(fit)}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[1]:
+            st.markdown(
+                f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{activity}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[2]:
+            st.markdown(
+                f"<div style='font-size:13px;color:#2C2C2A;padding-top:6px'>{rationale}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[3]:
+            st.checkbox("Re-engage Q3?", key=key)
+        st.markdown("<div style='height:4px;border-bottom:1px solid #EFF0EA;margin-bottom:4px'></div>", unsafe_allow_html=True)
+
+    local_buyers = [
+        ("Capitec",    "Very High", "Rapid SME banking rollout under new CEO",
+         "Would accelerate SME acquiring with 110k+ merchants. Issuer-backed economics makes Yoco highly valuable. Risk: may replicate organically."),
+        ("Vodacom",    "High",      "Active SME lending partnership with Lula",
+         "Direct SME merchant access and POS infra. Existing Lula ties could complicate structure but strategically strong fit."),
+        ("FNB",        "High",      "Expanding SME payments and digital services",
+         "Reach into long-tail merchants. Majority of Yoco merchants bank with FNB already."),
+        ("TymeBank",   "High",      "Bought Retail Capital ~$85–90M (2022)",
+         "Fills merchant acquiring gap perfectly. Concern: questions on Yoco team and profitability."),
+        ("Lesaka",     "Medium",    "Acquired Adumo ~$86–96M (2024)",
+         "Would cement largest independent acquirer in SA. Heavy merchant overlap makes integration complex."),
+        ("MTN",        "Medium",    "Expanding MoMo into payments and lending",
+         "Strengthen SME payments credibility. Patchy SA execution reduces near-term likelihood."),
+        ("Nedbank",    "Medium",    "Acquired iKhokha ~$94M (2025)",
+         "iKhokha already addressed SME acquiring gap, making another purchase less compelling."),
+        ("Old Mutual", "Low-Medium","Launching retail bank",
+         "SME entry via Yoco scale but not yet a proven strategic priority."),
+    ]
+
+    global_buyers = [
+        ("Stripe",      "Very High", "No recent Africa acquisitions",
+         "Africa entry via Yoco's 110k merchant POS network and SME payments rails."),
+        ("Adyen",       "Very High", "Scaling enterprise globally",
+         "African SME acquiring to complement enterprise focus. Would position Yoco as Africa's iZettle."),
+        ("Rapyd",       "High",      "Acquired PayU GPO $610M (2023)",
+         "Yoco POS complements digital stack. Short-term focus on PayU integration limits near-term appetite."),
+        ("Experian",    "High",      "Acquired Compuscan SA $263M (2019)",
+         "Transaction data enhances SME credit scoring. Direct outreach already made per Bruwer analysis."),
+        ("Nubank",      "High",      "Pan-African expansion signals",
+         "Pan-African growth ambitions. Yoco fits SME banking strategy."),
+        ("Zoho",        "Medium",    "Offices in Nigeria and Kenya",
+         "Full SME OS if POS integrated. Prefers organic growth over acquisition."),
+        ("Shopify",     "Medium",    "Scaling POS globally",
+         "Omnichannel seller ecosystem in Africa. Favours global tech over regional platforms."),
+        ("Amazon",      "Low-Medium","Launched Amazon.co.za (2024)",
+         "Enable card and QR acceptance for small sellers linking in-store to marketplace."),
+        ("TransUnion",  "Low-Medium","SME data solutions SA (2023)",
+         "Real-time merchant data overlap with existing bank and telco feeds."),
+    ]
+
+    tab_local, tab_global = st.tabs(["Local Buyers", "Global Buyers"])
+    with tab_local:
+        for name, fit, activity, rationale in local_buyers:
+            key = "engage_yoco_" + name.replace(" ", "")
+            _buyer_row(name, fit, activity, rationale, key)
+    with tab_global:
+        for name, fit, activity, rationale in global_buyers:
+            key = "engage_yoco_" + name.replace(" ", "")
+            _buyer_row(name, fit, activity, rationale, key)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 3: Next Steps Generator ──────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 4px 0;letter-spacing:.3px'>Next Steps Generator</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:14px'>"
+        "Tick buyers to re-engage above, then generate a prioritized outreach plan.</div>",
+        unsafe_allow_html=True,
+    )
+
+    _BUYER_ACTIONS = {
+        "Capitec":   "Request meeting with SME banking lead. Pitch profitability milestone and 110k merchant base as de-risked acquisition.",
+        "Vodacom":   "Use Lula relationship for warm intro. Frame initial conversation as partnership exploration.",
+        "FNB":       "Initiate conversation via existing merchant banking relationship. Explore strategic partnership or M&A dialogue.",
+        "TymeBank":  "Re-engage CEO directly. Address profitability concerns with latest financial data.",
+        "Experian":  "Follow up on prior outreach. Propose data partnership as first step toward deeper strategic conversation.",
+        "Stripe":    "Approach via investment banking intermediary. Frame Yoco as Africa market entry vehicle.",
+        "Adyen":     "Approach via investment banking intermediary. Frame Yoco as Africa market entry vehicle.",
+        "Rapyd":     "Revisit once PayU integration settles mid-2026. Flag for Q4 outreach.",
+    }
+    _PRIORITY_ORDER = [b[0] for b in local_buyers] + [b[0] for b in global_buyers]
+
+    if st.button("Generate Q3 2026 Exit Actions for Yoco"):
+        ticked = [
+            name for name in _PRIORITY_ORDER
+            if st.session_state.get("engage_yoco_" + name.replace(" ", ""), False)
+        ]
+
+        st.markdown("#### Strategic Acquisition Outreach")
+        if ticked:
+            for name in ticked:
+                action = _BUYER_ACTIONS.get(name, f"Schedule introductory strategic conversation with {name}.")
+                st.markdown(
+                    f"<div style='padding:10px 14px;margin-bottom:8px;background:#FFFFFF;"
+                    f"border:1px solid #D4D5CE;border-radius:8px'>"
+                    f"<span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"<span style='color:#2C2C2A;margin-left:10px'>{action}</span></div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown(
+                f"<div style='color:{MUTED};font-size:13px'>Tick at least one buyer above to generate actions.</div>",
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("#### GP-Led Secondary — Investor Universe")
+        secondary_investors = [
+            ("Pantheon Ventures",    "Active GP-led secondary buyer, strong fintech exposure"),
+            ("Lexington Partners",   "Large secondary fund with emerging market appetite"),
+            ("HarbourVest Partners", "Active in African tech secondaries"),
+            ("Verdane",              "European growth equity with fintech focus"),
+            ("NewQuest Capital",     "Asia-Pacific secondary specialist with Africa interest"),
+            ("TR Capital",           "Emerging market secondary specialist"),
+        ]
+        for inv_name, inv_desc in secondary_investors:
+            st.markdown(
+                f"<div style='padding:8px 14px;margin-bottom:6px;background:#FFFFFF;"
+                f"border:1px solid #D4D5CE;border-radius:8px'>"
+                f"<span style='font-weight:700;color:#2C2C2A'>{inv_name}</span>"
+                f"<span style='color:{MUTED};margin-left:10px;font-size:13px'>{inv_desc}</span></div>",
+                unsafe_allow_html=True,
+            )
+
+
 # ── Exit Tracking tab ─────────────────────────────────────────────────────────
 
 def render_exit_tab(info: pd.Series, company_id: int) -> None:
@@ -2043,6 +2253,11 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
     sector       = str(info.get("sector", "")).lower()
     _today       = datetime.utcnow()
     cur_q        = f"Q{(_today.month - 1) // 3 + 1} {_today.year}"
+
+    # ── Yoco custom exit tab ───────────────────────────────────────────────────
+    if company_name == "Yoco":
+        _render_yoco_exit_tab()
+        return
 
     LIKELIHOOD_OPTS = ["Exploratory", "Active", "Advanced", "On Hold"]
     STATUS_OPTS     = ["Not Started", "Warm", "Active", "Passed"]
