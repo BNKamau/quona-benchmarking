@@ -106,6 +106,22 @@ st.markdown(f"""
       border-color: #2C2C2A !important;
       background: #EFF0EA !important;
   }}
+
+  /* Filter radio spacing */
+  div[data-testid="stRadio"] {{ margin-bottom: 0px !important; margin-top: 0px !important; }}
+
+  /* Search box */
+  div[data-testid="stTextInput"] input {{
+      border: 1.5px solid #D4D5CE !important;
+      border-radius: 6px !important;
+      font-size: 13px !important;
+      color: #2C2C2A !important;
+      padding: 8px 12px !important;
+  }}
+  div[data-testid="stTextInput"] input:focus {{
+      border-color: #2C2C2A !important;
+      box-shadow: none !important;
+  }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -3173,25 +3189,50 @@ if st.session_state.page == "home":
     flags = compute_data_quality_flags(companies, ltm, all_rev)
 
     # ── Summary KPIs ──────────────────────────────────────────────────────────
-    col1, col2, col3, col4 = st.columns(4)
     ltm_gm_col = companies["ltm_gross_margin_pct"].combine_first(
         companies["gross_margin_pct"]
     )
     ltm_em_col = companies["ltm_ebitda_margin_pct"].combine_first(
         companies["ebitda_margin_pct"]
     )
-    col1.metric("Portfolio Companies", len(companies))
-    col2.metric("Combined LTM Revenue",
-                fmt_usd(companies["ltm_revenue"].sum()))
-    col3.metric("Avg Gross Margin",    fmt_pct(ltm_gm_col.mean()))
-    col4.metric("Avg EBITDA Margin",   fmt_pct(ltm_em_col.mean()))
-
-    st.markdown("<br>", unsafe_allow_html=True)
+    n_companies  = len(companies)
+    combined_rev = fmt_usd(companies["ltm_revenue"].sum())
+    avg_gm       = fmt_pct(ltm_gm_col.mean())
+    _avg_em_num  = ltm_em_col.mean()
+    avg_em       = fmt_pct(_avg_em_num)
+    _em_color    = "#2E7D32" if (not _is_null(_avg_em_num) and float(_avg_em_num) > 0) else "#C62828"
+    st.markdown(f"""
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;
+            background:white;border:1px solid #D4D5CE;border-radius:10px;
+            margin-bottom:20px;overflow:hidden">
+  <div style="padding:16px 24px;border-right:1px solid #D4D5CE">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.1em;
+                text-transform:uppercase;color:#93A3A1;margin-bottom:4px">Portfolio Companies</div>
+    <div style="font-size:28px;font-weight:800;color:#2C2C2A">{n_companies}</div>
+  </div>
+  <div style="padding:16px 24px;border-right:1px solid #D4D5CE">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.1em;
+                text-transform:uppercase;color:#93A3A1;margin-bottom:4px">Combined LTM Revenue</div>
+    <div style="font-size:28px;font-weight:800;color:#2C2C2A">{combined_rev}</div>
+  </div>
+  <div style="padding:16px 24px;border-right:1px solid #D4D5CE">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.1em;
+                text-transform:uppercase;color:#93A3A1;margin-bottom:4px">Avg Gross Margin</div>
+    <div style="font-size:28px;font-weight:800;color:#2C2C2A">{avg_gm}</div>
+  </div>
+  <div style="padding:16px 24px">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.1em;
+                text-transform:uppercase;color:#93A3A1;margin-bottom:4px">Avg EBITDA Margin</div>
+    <div style="font-size:28px;font-weight:800;color:{_em_color}">{avg_em}</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
     # ── Filter bar ────────────────────────────────────────────────────────────
     all_sectors = sorted(companies["sector"].dropna().unique().tolist())
     sector_options = ["All"] + [sector_label(s) for s in all_sectors]
 
+    st.markdown("<div style='font-size:11px;font-weight:700;color:#93A3A1;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px'>Fund</div>", unsafe_allow_html=True)
     selected_fund = st.radio(
         "Filter by fund",
         options=["All Funds", "Fund I", "Fund II", "Fund III"],
@@ -3202,6 +3243,7 @@ if st.session_state.page == "home":
 
     filter_col, sort_col = st.columns([4, 1])
     with filter_col:
+        st.markdown("<div style='font-size:11px;font-weight:700;color:#93A3A1;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px'>Sector</div>", unsafe_allow_html=True)
         selected_sector = st.radio(
             "Filter by sector",
             options=sector_options,
@@ -3229,7 +3271,7 @@ if st.session_state.page == "home":
 
     n_showing = len(filtered)
     st.markdown(
-        f"<div style='font-size:11px;color:{MUTED};letter-spacing:.04em;"
+        f"<div style='font-size:13px;font-weight:600;color:#2C2C2A;letter-spacing:.04em;"
         f"margin-bottom:14px'>{n_showing} of {len(companies)} companies</div>",
         unsafe_allow_html=True,
     )
