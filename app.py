@@ -1224,7 +1224,7 @@ def render_benchmarking_tab(
         ltm_m      = ltm_val / 1e6
         scale_frac = ltm_m / comp_rev  # 0.0 → 1.0+
 
-        # Fixed 4-node stages with revenue thresholds as % of comp exit scale
+        # Fixed 4-node stages — fractions used only for snapshot stat lookups
         STAGE_NODES = [
             ("Early Stage", 0.00, 0.25),
             ("Growth",      0.25, 0.60),
@@ -1233,15 +1233,21 @@ def render_benchmarking_tab(
         ]
         STAGE_SUBLABELS = [
             "< $5M revenue",
-            "$5M – $30M revenue",
-            "$30M – $100M revenue",
-            "> $100M + profitable",
+            "$6M – $30M revenue",
+            "$31M – $100M revenue",
+            "> $100M + EBITDA positive",
         ]
-        current_stage_idx = 3
-        for si, (_, lo, hi) in enumerate(STAGE_NODES):
-            if hi is None or scale_frac < hi:
-                current_stage_idx = si
-                break
+        # Stage classification on absolute revenue thresholds
+        if ltm_m < 5:
+            current_stage_idx = 0  # Early Stage
+        elif ltm_m <= 30:
+            current_stage_idx = 1  # Growth
+        elif ltm_m <= 100:
+            current_stage_idx = 2  # Pre-Exit
+        elif ltm_em_pct is not None and ltm_em_pct > 0:
+            current_stage_idx = 3  # Exit Ready — > $100M + EBITDA positive
+        else:
+            current_stage_idx = 2  # > $100M but not yet EBITDA positive → Pre-Exit
 
         # Derive per-stage rev ranges and median GM from snapshot data when available
         # _parse_pct handles "~40%", "(30%)", "60%+" — pd.to_numeric alone cannot
