@@ -1860,7 +1860,119 @@ def fetch_affinity_interactions(company_name: str) -> list[dict]:
             "type":        itype,
             "person_name": person_name,
             "summary":     summary,
+            "source":      "affinity",
         })
+
+    results.sort(key=lambda x: x["date"], reverse=True)
+    return results
+
+
+def fetch_slack_messages(company_name: str) -> list[dict]:
+    """Find the portco- Slack channel and return messages + thread replies from last 365 days."""
+    import requests
+
+    token = st.secrets.get("SLACK_BOT_TOKEN", "")
+    if not token:
+        raise ValueError("SLACK_BOT_TOKEN not set in .streamlit/secrets.toml")
+
+    BASE    = "https://slack.com/api"
+    HEADERS = {"Authorization": f"Bearer {token}"}
+
+    _CHANNEL_MAP = {"VertoFX": "portco-verto"}
+    if company_name in _CHANNEL_MAP:
+        channel_name = _CHANNEL_MAP[company_name]
+    else:
+        channel_name = "portco-" + company_name.lower().replace(" ", "-")
+
+    # Find channel ID (paginated)
+    channel_id = None
+    cursor = ""
+    while not channel_id:
+        params: dict = {"exclude_archived": "true", "limit": 200}
+        if cursor:
+            params["cursor"] = cursor
+        r = requests.get(f"{BASE}/conversations.list", headers=HEADERS,
+                         params=params, timeout=15)
+        data = r.json()
+        if not data.get("ok"):
+            raise ValueError(f"Slack conversations.list error: {data.get('error')}")
+        for ch in data.get("channels", []):
+            if ch["name"] == channel_name:
+                channel_id = ch["id"]
+                break
+        cursor = data.get("response_metadata", {}).get("next_cursor", "")
+        if not cursor:
+            break
+
+    if not channel_id:
+        return []
+
+    cutoff_ts = str((datetime.now(timezone.utc) - timedelta(days=365)).timestamp())
+
+    _user_cache: dict[str, str] = {}
+
+    def _user_name(uid: str) -> str:
+        if uid in _user_cache:
+            return _user_cache[uid]
+        try:
+            rp = requests.get(f"{BASE}/users.info", headers=HEADERS,
+                              params={"user": uid}, timeout=10)
+            u = rp.json().get("user", {})
+            name = u.get("real_name") or u.get("name") or uid
+        except Exception:
+            name = uid
+        _user_cache[uid] = name
+        return name
+
+    results = []
+    cursor = ""
+    while True:
+        params = {"channel": channel_id, "oldest": cutoff_ts, "limit": 200}
+        if cursor:
+            params["cursor"] = cursor
+        r = requests.get(f"{BASE}/conversations.history", headers=HEADERS,
+                         params=params, timeout=15)
+        data = r.json()
+        if not data.get("ok"):
+            raise ValueError(f"Slack conversations.history error: {data.get('error')}")
+
+        for msg in data.get("messages", []):
+            if msg.get("type") != "message" or msg.get("subtype"):
+                continue
+            ts       = float(msg.get("ts", 0))
+            date_str = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+            text     = (msg.get("text") or "").strip()
+            results.append({
+                "date":             date_str,
+                "type":             "Message",
+                "person_name":      _user_name(msg.get("user", "")),
+                "summary":          text[:600] + ("…" if len(text) > 600 else ""),
+                "source":           "slack",
+                "is_thread_reply":  False,
+            })
+
+            # Fetch thread replies for threaded messages
+            if msg.get("reply_count") and msg.get("thread_ts") == msg.get("ts"):
+                rr = requests.get(f"{BASE}/conversations.replies", headers=HEADERS,
+                                  params={"channel": channel_id, "ts": msg["ts"]},
+                                  timeout=15)
+                rdata = rr.json()
+                if rdata.get("ok"):
+                    for reply in rdata.get("messages", [])[1:]:
+                        rts   = float(reply.get("ts", 0))
+                        rtext = (reply.get("text") or "").strip()
+                        results.append({
+                            "date":            datetime.fromtimestamp(rts, tz=timezone.utc).strftime("%Y-%m-%d"),
+                            "type":            "Thread Reply",
+                            "person_name":     _user_name(reply.get("user", "")),
+                            "summary":         rtext[:600] + ("…" if len(rtext) > 600 else ""),
+                            "source":          "slack",
+                            "is_thread_reply": True,
+                        })
+
+        cursor = data.get("response_metadata", {}).get("next_cursor", "")
+        if not cursor:
+            break
 
     results.sort(key=lambda x: x["date"], reverse=True)
     return results
@@ -1878,8 +1990,9 @@ def classify_exit_relevant(interactions: list[dict]) -> list[dict]:
     import json as _json
 
     interactions_text = _json.dumps(
-        [{"index": i, "date": x["date"], "type": x["type"],
-          "person": x["person_name"], "summary": x["summary"]}
+        [{"index": i, "source": x.get("source", ""), "date": x.get("date", ""),
+          "type": x.get("type", ""), "person": x.get("person_name", ""),
+          "summary": x.get("summary", "")}
          for i, x in enumerate(interactions)],
         indent=2,
     )
@@ -2005,36 +2118,70 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
     # ── Section 2: Affinity CRM Sync ──────────────────────────────────────────
     _sh("Affinity CRM Sync")
 
-    aff_key = f"affinity_results_{company_id}"
-    if aff_key not in st.session_state:
-        st.session_state[aff_key] = None
+    sync_key = f"crm_sync_results_{company_id}"
+    if sync_key not in st.session_state:
+        st.session_state[sync_key] = None
 
-    if st.button("Sync from Affinity", key=f"aff_sync_{company_id}"):
-        with st.spinner("Fetching interactions from Affinity…"):
+    if st.button("Sync from Affinity + Slack", key=f"crm_sync_{company_id}"):
+        with st.spinner("Fetching from Affinity and Slack…"):
+            import concurrent.futures
+            aff_items  = []
+            slk_items  = []
+            aff_error  = ""
+            slk_error  = ""
+
+            def _fetch_aff():
+                return fetch_affinity_interactions(company_name)
+
+            def _fetch_slk():
+                return fetch_slack_messages(company_name)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                fut_aff = pool.submit(_fetch_aff)
+                fut_slk = pool.submit(_fetch_slk)
+                try:
+                    aff_items = fut_aff.result()
+                except Exception as e:
+                    aff_error = str(e)
+                try:
+                    slk_items = fut_slk.result()
+                except Exception as e:
+                    slk_error = str(e)
+
+            if aff_error:
+                st.warning(f"Affinity: {aff_error}")
+            if slk_error:
+                st.warning(f"Slack: {slk_error}")
+
+            combined = aff_items + slk_items
             try:
-                interactions = fetch_affinity_interactions(company_name)
-                relevant     = classify_exit_relevant(interactions)
-                st.session_state[aff_key] = {
-                    "total":    len(interactions),
-                    "relevant": relevant,
-                }
-            except Exception as exc:
-                st.error(f"Affinity sync failed: {exc}")
+                relevant = classify_exit_relevant(combined)
+            except Exception as e:
+                st.error(f"Classification failed: {e}")
+                relevant = []
 
-    aff_data = st.session_state[aff_key]
-    if aff_data is not None:
-        total    = aff_data["total"]
-        relevant = aff_data["relevant"]
+            st.session_state[sync_key] = {
+                "aff_count": len(aff_items),
+                "slk_count": len(slk_items),
+                "relevant":  relevant,
+            }
+
+    sync_data = st.session_state[sync_key]
+    if sync_data is not None:
+        aff_n    = sync_data["aff_count"]
+        slk_n    = sync_data["slk_count"]
+        relevant = sync_data["relevant"]
         st.markdown(
             f"<div style='font-size:13px;color:{MUTED};margin-bottom:12px'>"
-            f"{total} interactions found, {len(relevant)} exit-relevant</div>",
+            f"{aff_n} Affinity notes + {slk_n} Slack messages found, "
+            f"{len(relevant)} exit-relevant total</div>",
             unsafe_allow_html=True,
         )
 
         # Auto-add acquirer hints to buyer universe
         hints = [r["acquirer_hint"] for r in relevant if r.get("acquirer_hint")]
         if hints:
-            buyers_df_now = _buyer_tracking_load(company_id)
+            buyers_df_now  = _buyer_tracking_load(company_id)
             existing_names = set(buyers_df_now["acquirer_name"].str.strip().str.lower())
             added = []
             for hint in hints:
@@ -2059,25 +2206,36 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
         # Show exit-relevant interactions
         if relevant:
             for item in relevant:
+                src = item.get("source", "")
+                if src == "slack":
+                    badge_bg, badge_fg, border = "#F0E6FF", "#4A154B", "#9C27B0"
+                else:
+                    badge_bg, badge_fg, border = "#C5E5FF", "#1565C0", "#1565C0"
+                src_badge = (
+                    f"<span style='background:{badge_bg};color:{badge_fg};"
+                    f"border-radius:3px;padding:1px 6px;font-size:10px;"
+                    f"font-weight:600;margin-right:6px'>"
+                    f"{'Slack' if src == 'slack' else 'Affinity'}</span>"
+                )
                 hint_badge = (
-                    f" · <span style='color:{BLUE};font-weight:600'>"
+                    f" · <span style='color:#1565C0;font-weight:600'>"
                     f"{item['acquirer_hint']}</span>"
                     if item.get("acquirer_hint") else ""
                 )
                 st.markdown(
-                    f"<div style='border-left:3px solid {BLUE};padding:8px 12px;"
+                    f"<div style='border-left:3px solid {border};padding:8px 12px;"
                     f"margin-bottom:8px;background:#F8FAFF;border-radius:0 4px 4px 0'>"
                     f"<div style='font-size:11px;color:{MUTED};margin-bottom:3px'>"
-                    f"{item['date']} · {item['type']} · {item['person_name']}"
-                    f"{hint_badge}</div>"
-                    f"<div style='font-size:13px;color:{BLACK}'>{item['summary']}</div>"
+                    f"{src_badge}{item['date']} · {item.get('type','')} · "
+                    f"{item.get('person_name','')}{hint_badge}</div>"
+                    f"<div style='font-size:13px;color:{BLACK}'>{item.get('summary','')}</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
         else:
             st.markdown(
                 f"<div style='font-size:13px;color:{MUTED}'>No exit-relevant "
-                f"interactions found in last 180 days.</div>",
+                f"interactions found.</div>",
                 unsafe_allow_html=True,
             )
 
