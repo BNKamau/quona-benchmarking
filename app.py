@@ -366,10 +366,9 @@ def load_ltm_revenue() -> pd.DataFrame:
 def load_ltm_volume() -> pd.DataFrame:
     """Sum of tpv_usd and gmv_usd across the last 12 monthly periods per company."""
     return pd.read_sql_query("""
-        SELECT
-            company_id AS id,
-            SUM(tpv_usd) AS ltm_tpv_usd,
-            SUM(gmv_usd) AS ltm_gmv_usd
+        SELECT company_id AS id,
+               SUM(tpv_usd) AS ltm_tpv_usd,
+               SUM(gmv_usd) AS ltm_gmv_usd
         FROM (
             SELECT company_id, tpv_usd, gmv_usd,
                    ROW_NUMBER() OVER (
@@ -377,8 +376,7 @@ def load_ltm_volume() -> pd.DataFrame:
                    ) AS rn
             FROM kpi_snapshots
             WHERE period_type = 'monthly'
-              AND (tpv_usd IS NOT NULL OR gmv_usd IS NOT NULL)
-        )
+        ) ranked
         WHERE rn <= 12
         GROUP BY company_id
     """, _conn())
