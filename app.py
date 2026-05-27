@@ -2385,26 +2385,22 @@ if st.session_state.page == "home":
             label_visibility="collapsed",
         )
     with sort_col:
-        sort_by = st.selectbox(
-            "Sort",
-            ["Name", "LTM Revenue", "Rev Growth"],
+        st.text_input(
+            "Search",
+            placeholder="Search by name...",
+            key="company_search",
             label_visibility="collapsed",
         )
 
-    # Apply fund filter, then sector filter
+    # Apply fund filter, then sector filter, then name search
     filtered = companies.copy()
     if selected_fund != "All Funds":
         filtered = filtered[filtered["fund"] == selected_fund]
     if selected_sector != "All":
         filtered = filtered[filtered["sector"].apply(sector_label) == selected_sector]
+    filtered = filtered[filtered["name"].str.contains(st.session_state.get("company_search", ""), case=False, na=False)]
 
-    # Apply sort
-    if sort_by == "LTM Revenue":
-        filtered = filtered.sort_values("ltm_revenue", ascending=False, na_position="last")
-    elif sort_by == "Rev Growth":
-        filtered = filtered.sort_values("revenue_growth_pct", ascending=False, na_position="last")
-    else:
-        filtered = filtered.sort_values("name")
+    filtered = filtered.sort_values("name")
 
     n_showing = len(filtered)
     st.markdown(
