@@ -1223,6 +1223,12 @@ def render_benchmarking_tab(
             ("Pre-Exit",    0.60, 0.90),
             ("Exit Ready",  0.90, None),
         ]
+        STAGE_SUBLABELS = [
+            "< $5M revenue",
+            "$5M – $30M revenue",
+            "$30M – $100M revenue",
+            "> $100M + profitable",
+        ]
         current_stage_idx = 3
         for si, (_, lo, hi) in enumerate(STAGE_NODES):
             if hi is None or scale_frac < hi:
@@ -1292,7 +1298,7 @@ def render_benchmarking_tab(
                 f"box-shadow:{dot_shadow}'></div>"
                 f"<div style='height:2px;flex:1;background:{rl_bg}'></div>"
                 f"</div>"
-                f"<div style='font-size:11px;color:{MUTED}'>{rev_range_str or '—'}</div>"
+                f"<div style='font-size:10px;color:{MUTED};text-align:center'>{STAGE_SUBLABELS[i]}</div>"
                 f"</div>"
             )
 
@@ -1338,11 +1344,18 @@ def render_benchmarking_tab(
         f"letter-spacing:.5px;color:{MUTED};border-bottom:2px solid {BORDER};white-space:nowrap;"
         f"width:{w}'>{h}</th>"
         for h, w in [
-            ("Company", "20%"), ("Sub-sector", "18%"), ("Geography", "10%"),
-            ("Rev at Exit", "10%"), ("Gross Margin", "10%"), ("EBITDA Margin", "10%"),
-            ("EV/Rev", "8%"), ("Relevance", "8%"), ("Conf.", "6%"),
+            ("Company", "18%"), ("Sub-sector", "14%"), ("Geography", "8%"),
+            ("Exit Type", "8%"), ("Year", "5%"),
+            ("Rev at Exit", "8%"), ("Gross Margin", "8%"), ("EBITDA Margin", "8%"),
+            ("EV/Rev", "7%"), ("Relevance", "8%"), ("Conf.", "6%"),
         ]
     )
+
+    EXIT_TYPE_COLORS = {
+        "acquisition":      ("#C5E5FF", "#1565C0"),
+        "ipo":              ("#D5FA94", "#2C2C2A"),
+        "private funding":  ("#D4D5CE", "#2C2C2A"),
+    }
 
     rows_html = ""
     for idx, row in comps.iterrows():
@@ -1356,17 +1369,38 @@ def render_benchmarking_tab(
         conf_dot_c = CONF_DOT.get(conf_raw, MUTED)
         row_bg     = WHITE if idx % 2 == 0 else "#F9FAF7"
 
+        url         = row.get("announcement_url") or ""
+        co_name     = row["company_name"]
+        name_html   = (
+            f"<a href='{url}' target='_blank' rel='noopener noreferrer' "
+            f"style='color:{BLACK};text-decoration:underline;text-underline-offset:2px'>"
+            f"{co_name}</a>"
+            if url else co_name
+        )
+        exit_type_raw = str(row.get("exit_type") or "").strip()
+        et_key        = exit_type_raw.lower()
+        et_bg, et_fg  = EXIT_TYPE_COLORS.get(et_key, ("#D4D5CE", "#2C2C2A"))
+        et_html       = (
+            f"<span style='background:{et_bg};color:{et_fg};border-radius:4px;"
+            f"padding:2px 7px;font-size:11px;font-weight:600'>{exit_type_raw}</span>"
+            if exit_type_raw else "—"
+        )
+        exit_date_raw = str(row.get("exit_date") or "")
+        year_html     = exit_date_raw[:4] if len(exit_date_raw) >= 4 else "—"
+
         rows_html += (
             f"<tr style='background:{row_bg}'>"
-            f"<td style='padding:8px 12px;font-weight:600;color:{BLACK};width:20%'>{row['company_name']}</td>"
-            f"<td style='padding:8px 12px;font-size:12px;color:{MUTED};width:18%'>"
+            f"<td style='padding:8px 12px;font-weight:600;color:{BLACK};width:18%'>{name_html}</td>"
+            f"<td style='padding:8px 12px;font-size:12px;color:{MUTED};width:14%'>"
             f"{(row.get('sub_sector') or '—').replace('_',' ').title()}</td>"
-            f"<td style='padding:8px 12px;font-size:12px;color:{MUTED};width:10%'>{row.get('geography','—')}</td>"
-            f"<td style='padding:8px 12px;font-weight:500;width:10%'>"
+            f"<td style='padding:8px 12px;font-size:12px;color:{MUTED};width:8%'>{row.get('geography','—')}</td>"
+            f"<td style='padding:8px 12px;width:8%'>{et_html}</td>"
+            f"<td style='padding:8px 12px;font-size:12px;color:{MUTED};width:5%'>{year_html}</td>"
+            f"<td style='padding:8px 12px;font-weight:500;width:8%'>"
             f"{'$'+str(round(rev))+'M' if not _is_null(rev) else '—'}</td>"
-            f"<td style='padding:8px 12px;width:10%'>{fmt_pct(gm)}</td>"
-            f"<td style='padding:8px 12px;width:10%'>{fmt_pct(em)}</td>"
-            f"<td style='padding:8px 12px;width:8%'>{f'{ev:.1f}x' if not _is_null(ev) else '—'}</td>"
+            f"<td style='padding:8px 12px;width:8%'>{fmt_pct(gm)}</td>"
+            f"<td style='padding:8px 12px;width:8%'>{fmt_pct(em)}</td>"
+            f"<td style='padding:8px 12px;width:7%'>{f'{ev:.1f}x' if not _is_null(ev) else '—'}</td>"
             f"<td style='padding:8px 12px;width:8%'>"
             f"<span style='background:{bg_r};color:{fg_r};border-radius:4px;"
             f"padding:2px 8px;font-size:11px;font-weight:600'>{rel}/5</span></td>"
