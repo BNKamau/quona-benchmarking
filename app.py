@@ -157,7 +157,8 @@ def load_comps_detail(comp_ids: tuple) -> pd.DataFrame:
                exit_status, exit_year, exit_type, exit_ev_usd_m,
                revenue_at_exit_usd_m, gross_margin_pct, ebitda_margin_pct,
                ev_revenue_multiple, data_confidence, key_narrative_drivers,
-               revenue_growth_at_exit
+               revenue_growth_at_exit,
+               COALESCE(is_clean_exit, 1) AS is_clean_exit
         FROM exit_comps WHERE comp_id IN ({ph})
     """, _comps_conn(), params=list(comp_ids))
 
@@ -514,6 +515,10 @@ def compute_comp_benchmarks(comps: pd.DataFrame) -> dict:
     hi = comps[comps["data_confidence"].str.lower().isin(["high", "medium"])] \
         if "data_confidence" in comps.columns else comps
 
+    # Restrict medians to completed exits only — excludes pre-exit funding marks
+    if "is_clean_exit" in hi.columns:
+        hi = hi[hi["is_clean_exit"] == 1]
+
     def _med(col, df=hi):
         v = df[col].dropna() if col in df.columns else pd.Series(dtype=float)
         return float(v.median()) if not v.empty else None
@@ -713,7 +718,10 @@ def render_benchmarking_tab(
 
     comps = (
         comps.merge(comp_mapping, on="comp_id", how="left")
-             .sort_values("relevance_score", ascending=False)
+             .sort_values(
+                 ["is_clean_exit", "relevance_score"],
+                 ascending=[False, False],
+             )
              .reset_index(drop=True)
     )
 
@@ -1357,8 +1365,10 @@ def render_benchmarking_tab(
         "private funding":  ("#D4D5CE", "#2C2C2A"),
     }
 
-    rows_html = ""
+    rows_html      = ""
+    separator_done = False
     for idx, row in comps.iterrows():
+        is_clean   = int(row.get("is_clean_exit", 1))
         rel        = int(row["relevance_score"]) if not _is_null(row.get("relevance_score")) else 0
         bg_r, fg_r = REL_COLORS.get(rel, ("#F5F5F5", MUTED))
         rev        = row.get("revenue_at_exit_usd_m")
@@ -1369,27 +1379,51 @@ def render_benchmarking_tab(
         conf_dot_c = CONF_DOT.get(conf_raw, MUTED)
         row_bg     = WHITE if idx % 2 == 0 else "#F9FAF7"
 
-        url         = row.get("announcement_url") or ""
-        co_name     = row["company_name"]
-        name_html   = (
+        # Inject separator row when transitioning to pre-exit comps
+        if not is_clean and not separator_done:
+            separator_done = True
+            n_cols = 11
+            rows_html += (
+                f"<tr><td colspan='{n_cols}' style='padding:4px 12px;background:#F9FAF7;"
+                f"border-top:2px dashed {BORDER};border-bottom:2px dashed {BORDER}'>"
+                f"<span style='font-size:10px;font-weight:700;color:{MUTED};"
+                f"text-transform:uppercase;letter-spacing:.5px'>"
+                f"Pre-exit / Funding Marks — excluded from median calculations</span>"
+                f"</td></tr>"
+            )
+
+        url       = row.get("announcement_url") or ""
+        co_name   = row["company_name"]
+        name_html = (
             f"<a href='{url}' target='_blank' rel='noopener noreferrer' "
             f"style='color:{BLACK};text-decoration:underline;text-underline-offset:2px'>"
             f"{co_name}</a>"
             if url else co_name
         )
+        # Add Zettle note
+        if co_name == "Zettle":
+            name_html += f"<div style='font-size:10px;color:{MUTED};font-style:italic'>Same deal as iZettle</div>"
+
         exit_type_raw = str(row.get("exit_type") or "").strip()
         et_key        = exit_type_raw.lower()
-        et_bg, et_fg  = EXIT_TYPE_COLORS.get(et_key, ("#D4D5CE", "#2C2C2A"))
-        et_html       = (
-            f"<span style='background:{et_bg};color:{et_fg};border-radius:4px;"
-            f"padding:2px 7px;font-size:11px;font-weight:600'>{exit_type_raw}</span>"
-            if exit_type_raw else "—"
-        )
-        exit_date_raw = str(row.get("exit_date") or "")
-        year_html     = exit_date_raw[:4] if len(exit_date_raw) >= 4 else "—"
+        if not is_clean:
+            et_html = (
+                f"<span style='font-size:11px;color:{MUTED};font-style:italic'>"
+                f"Pre-exit / funding mark</span>"
+            )
+        else:
+            et_bg, et_fg = EXIT_TYPE_COLORS.get(et_key, ("#D4D5CE", "#2C2C2A"))
+            et_html = (
+                f"<span style='background:{et_bg};color:{et_fg};border-radius:4px;"
+                f"padding:2px 7px;font-size:11px;font-weight:600'>{exit_type_raw}</span>"
+                if exit_type_raw else "—"
+            )
+
+        exit_year_raw = row.get("exit_year")
+        year_html     = str(int(exit_year_raw)) if not _is_null(exit_year_raw) else "—"
 
         rows_html += (
-            f"<tr style='background:{row_bg}'>"
+            f"<tr style='background:{row_bg};opacity:{'0.7' if not is_clean else '1'}'>"
             f"<td style='padding:8px 12px;font-weight:600;color:{BLACK};width:18%'>{name_html}</td>"
             f"<td style='padding:8px 12px;font-size:12px;color:{MUTED};width:14%'>"
             f"{(row.get('sub_sector') or '—').replace('_',' ').title()}</td>"
@@ -1412,11 +1446,19 @@ def render_benchmarking_tab(
 
     st.markdown(
         f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
-        f"overflow:auto;margin-bottom:20px'>"
+        f"overflow:auto;margin-bottom:8px'>"
         f"<table style='width:100%;border-collapse:collapse'>"
         f"<thead><tr style='background:{BG}'>{hdr_html}</tr></thead>"
         f"<tbody>{rows_html}</tbody>"
         f"</table></div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:11px;color:{MUTED};font-style:italic;margin-bottom:20px'>"
+        f"Median calculations exclude SumUp (pre-exit funding mark, 45.2x) and CloudWalk "
+        f"(pre-exit, no EV/Rev) as these are not completed exits. "
+        f"Zettle is the post-rebrand entity from the same iZettle–PayPal transaction."
+        f"</div>",
         unsafe_allow_html=True,
     )
 
