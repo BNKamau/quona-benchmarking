@@ -3492,37 +3492,91 @@ elif st.session_state.page == "detail":
             kpis_24 = kpis_sorted.copy()
 
         # ── Chart builders ────────────────────────────────────────────────────
-        def _base_layout(title, y_fmt):
-            return dict(
-                title=dict(text=title, font=dict(color=BLACK, size=13, weight=500), x=0, pad=dict(l=4)),
-                plot_bgcolor=WHITE, paper_bgcolor=WHITE,
-                font=dict(color=BLACK, size=11),
-                xaxis=dict(
-                    showgrid=False, tickformat="%b %Y", tickfont=dict(size=10),
-                    linecolor=BORDER, showline=True,
+        def apply_executive_style(fig, title, y_fmt="number"):
+            t = title.lower()
+            if "gross margin" in t:
+                line_color = "#2E7D32"
+            elif "customer" in t or "client" in t:
+                line_color = "#93A3A1"
+            else:
+                line_color = "#2C2C2A"
+
+            lc_r = int(line_color[1:3], 16)
+            lc_g = int(line_color[3:5], 16)
+            lc_b = int(line_color[5:7], 16)
+
+            last_x = last_y = None
+            for trace in fig.data:
+                mode = getattr(trace, "mode", "") or ""
+                if "lines" in mode:
+                    update_kwargs = dict(
+                        line=dict(width=2.5, color=line_color),
+                        mode="lines",
+                        marker=dict(size=0, opacity=0),
+                    )
+                    if getattr(trace, "fill", None):
+                        update_kwargs["fillcolor"] = f"rgba({lc_r},{lc_g},{lc_b},0.08)"
+                    trace.update(update_kwargs)
+                    if trace.x is not None and len(trace.x) > 0:
+                        last_x = trace.x[-1]
+                        last_y = trace.y[-1] if trace.y is not None and len(trace.y) > 0 else None
+                elif mode == "none" and getattr(trace, "fill", None) == "tozeroy":
+                    if trace.y is not None and any(v < 0 for v in trace.y if v is not None):
+                        trace.update(fillcolor="rgba(255,138,133,0.08)")
+
+            if last_x is not None and last_y is not None:
+                try:
+                    float(last_y)
+                    fig.add_trace(go.Scatter(
+                        x=[last_x], y=[last_y],
+                        mode="markers",
+                        marker=dict(size=7, color=line_color, line=dict(width=2, color="white")),
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ))
+                except (TypeError, ValueError):
+                    pass
+
+            fig.update_layout(
+                font=dict(family="DM Sans, Trebuchet MS, sans-serif", color="#2C2C2A"),
+                plot_bgcolor="white",
+                paper_bgcolor="white",
+                margin=dict(l=20, r=20, t=40, b=20),
+                title=dict(
+                    text=title,
+                    font=dict(size=14, color="#2C2C2A"),
+                    x=0, xanchor="left",
                 ),
-                yaxis=dict(
-                    showgrid=True, gridcolor="#F0F0EC",
-                    ticksuffix="%" if y_fmt == "pct" else "",
-                    tickprefix="$" if y_fmt == "usd" else "",
-                    tickfont=dict(size=10),
-                    zeroline=False,
+                legend=dict(
+                    orientation="h", yanchor="bottom", y=-0.2,
+                    xanchor="left", x=0, font=dict(size=11),
                 ),
-                margin=dict(l=8, r=8, t=40, b=8),
-                height=CHART_H,
                 hovermode="x unified",
+                height=CHART_H,
                 showlegend=False,
+            )
+            fig.update_xaxes(
+                showgrid=False,
+                showline=False,
+                tickfont=dict(size=11, color="#93A3A1"),
+                tickcolor="#93A3A1",
+                tickformat="%b %Y",
+            )
+            fig.update_yaxes(
+                showgrid=True,
+                gridcolor="#EFF0EA",
+                gridwidth=1,
+                showline=False,
+                tickfont=dict(size=11, color="#93A3A1"),
+                zeroline=True,
+                zerolinecolor="#D4D5CE",
+                zerolinewidth=1,
+                ticksuffix="%" if y_fmt == "pct" else "",
+                tickprefix="$" if y_fmt == "usd" else "",
             )
 
         def _chart_card(fig):
-            """Wrap a plotly fig in a white card with border."""
-            st.markdown(
-                f"<div style='background:{WHITE};border:1px solid {BORDER};"
-                f"border-radius:10px;overflow:hidden;padding:4px 0 0 0'>",
-                unsafe_allow_html=True,
-            )
             st.plotly_chart(fig, use_container_width=True, config=CFG)
-            st.markdown("</div>", unsafe_allow_html=True)
 
         def _simple_chart(col, y_fmt, title, line_color):
             sub = kpis_24[[col, "period_end_date"]].dropna()
@@ -3540,7 +3594,7 @@ elif st.session_state.page == "detail":
                 fillcolor=f"rgba({r},{g},{b},0.08)",
                 hovertemplate=f"%{{x|%b %Y}}<br>{hover}<extra></extra>",
             ))
-            fig.update_layout(**_base_layout(title, y_fmt))
+            apply_executive_style(fig, title, y_fmt)
             return fig
 
         def _ebitda_chart(col, y_fmt, title):
@@ -3579,11 +3633,6 @@ elif st.session_state.page == "detail":
                 hovertemplate=f"%{{x|%b %Y}}<br>{hover}<extra></extra>",
             ))
 
-            layout = _base_layout(title, y_fmt)
-            layout["yaxis"]["zeroline"]      = True
-            layout["yaxis"]["zerolinecolor"] = "#555550"
-            layout["yaxis"]["zerolinewidth"] = 2
-
             # Annotation: first profitable month or best EBITDA
             ebitda_series = pd.Series(vals, index=dates)
             annotations = []
@@ -3591,17 +3640,12 @@ elif st.session_state.page == "detail":
             if not pos_months.empty:
                 first_pos_date = pos_months.index[0]
                 all_pos_before = ebitda_series.loc[:first_pos_date]
-                # "first profitable" if no positive values before this one
                 if (all_pos_before.iloc[:-1] <= 0).all():
-                    best_date  = ebitda_series.idxmax()
-                    label_date = first_pos_date
-                    ann_text   = "First profitable"
-                    # only show annotation if within chart window
                     annotations.append(dict(
-                        x=label_date, y=ebitda_series[label_date],
-                        text=ann_text, showarrow=True, arrowhead=2,
-                        arrowcolor=C_EBITDA_P, font=dict(size=10, color=C_EBITDA_P),
-                        bgcolor=WHITE, bordercolor=C_EBITDA_P, borderwidth=1,
+                        x=first_pos_date, y=ebitda_series[first_pos_date],
+                        text="First profitable", showarrow=True, arrowhead=2,
+                        arrowcolor="#D5FA94", font=dict(size=11, color="#2C2C2A"),
+                        bgcolor="white", bordercolor="#D4D5CE", borderwidth=1,
                         borderpad=3, ax=0, ay=-30,
                     ))
                 else:
@@ -3611,14 +3655,14 @@ elif st.session_state.page == "detail":
                         annotations.append(dict(
                             x=best_date, y=best_val,
                             text="Best EBITDA", showarrow=True, arrowhead=2,
-                            arrowcolor=C_EBITDA_P, font=dict(size=10, color=C_EBITDA_P),
-                            bgcolor=WHITE, bordercolor=C_EBITDA_P, borderwidth=1,
+                            arrowcolor="#D5FA94", font=dict(size=11, color="#2C2C2A"),
+                            bgcolor="white", bordercolor="#D4D5CE", borderwidth=1,
                             borderpad=3, ax=0, ay=-30,
                         ))
-            if annotations:
-                layout["annotations"] = annotations
 
-            fig.update_layout(**layout)
+            apply_executive_style(fig, title, y_fmt)
+            if annotations:
+                fig.update_layout(annotations=annotations)
             return fig
 
         def _section_header(text):
