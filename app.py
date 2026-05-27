@@ -363,6 +363,27 @@ def load_ltm_revenue() -> pd.DataFrame:
     return pd.DataFrame(results)
 
 @st.cache_data(ttl=300)
+def load_ltm_volume() -> pd.DataFrame:
+    """Sum of tpv_usd and gmv_usd across the last 12 monthly periods per company."""
+    return pd.read_sql_query("""
+        SELECT
+            company_id AS id,
+            SUM(tpv_usd) AS ltm_tpv_usd,
+            SUM(gmv_usd) AS ltm_gmv_usd
+        FROM (
+            SELECT company_id, tpv_usd, gmv_usd,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY company_id ORDER BY period_end_date DESC
+                   ) AS rn
+            FROM kpi_snapshots
+            WHERE period_type = 'monthly'
+              AND (tpv_usd IS NOT NULL OR gmv_usd IS NOT NULL)
+        )
+        WHERE rn <= 12
+        GROUP BY company_id
+    """, _conn())
+
+@st.cache_data(ttl=300)
 def load_all_revenue() -> pd.DataFrame:
     return pd.read_sql_query("""
         SELECT company_id AS id, period_end_date, revenue_usd
@@ -3111,9 +3132,11 @@ if st.session_state.page == "home":
     growth    = load_revenue_growth()
     ltm       = load_ltm_revenue()
     all_rev   = load_all_revenue()
+    vol       = load_ltm_volume()
 
     companies = companies.merge(growth, on="id", how="left")
     companies = companies.merge(ltm,    on="id", how="left")
+    companies = companies.merge(vol,    on="id", how="left")
 
     flags = compute_data_quality_flags(companies, ltm, all_rev)
 
@@ -3204,8 +3227,14 @@ if st.session_state.page == "home":
                  _pct_color(row.get("ltm_ebitda_margin_pct") or row.get("ebitda_margin_pct"))),
             )
         elif sector == "payments":
-            tpv = row.get("tpv_usd") or row.get("gmv_usd")
-            tpv_lbl = "TPV" if not _is_null(row.get("tpv_usd")) else "GMV"
+            ltm_tpv = row.get("ltm_tpv_usd")
+            ltm_gmv = row.get("ltm_gmv_usd")
+            if not _is_null(ltm_tpv):
+                tpv, tpv_lbl = ltm_tpv, "LTM TPV"
+            elif not _is_null(ltm_gmv):
+                tpv, tpv_lbl = ltm_gmv, "LTM GMV"
+            else:
+                tpv, tpv_lbl = None, "LTM TPV"
             return (
                 (tpv_lbl,     fmt_usd(tpv),  BLACK),
                 ("EBITDA Mgn", fmt_pct(row.get("ltm_ebitda_margin_pct") or row.get("ebitda_margin_pct")),
