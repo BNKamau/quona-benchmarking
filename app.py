@@ -75,6 +75,37 @@ st.markdown(f"""
   }}
 
   div[role="radiogroup"] label p {{ color: #2C2C2A !important; font-weight: 600 !important; }}
+
+  /* Landing page cards */
+  div[data-testid="stVerticalBlockBorderWrapper"] {{
+      border-radius: 10px !important;
+      border: 1px solid #D4D5CE !important;
+      box-shadow: 0 2px 8px rgba(44,44,42,0.06) !important;
+      transition: box-shadow 0.2s ease, transform 0.15s ease !important;
+      background: white !important;
+  }}
+  div[data-testid="stVerticalBlockBorderWrapper"]:hover {{
+      box-shadow: 0 6px 20px rgba(44,44,42,0.12) !important;
+      transform: translateY(-2px) !important;
+  }}
+
+  /* View company outlined button */
+  button[data-testid*="co_"] > div > p {{
+      font-size: 13px !important;
+      font-weight: 600 !important;
+      color: #2C2C2A !important;
+  }}
+  button[data-testid*="co_"] {{
+      background: white !important;
+      border: 1.5px solid #D4D5CE !important;
+      border-radius: 6px !important;
+      color: #2C2C2A !important;
+      margin-top: 4px !important;
+  }}
+  button[data-testid*="co_"]:hover {{
+      border-color: #2C2C2A !important;
+      background: #EFF0EA !important;
+  }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -3291,21 +3322,42 @@ if st.session_state.page == "home":
         # Sector-specific metric
         (lbl3, val3, col3), _ = _sector_metric_pair(row)
 
+        SECTOR_BORDER = {
+            "payments":         "#D5FA94",
+            "lending":          "#C5E5FF",
+            "wealth_management":"#C5E5FF",
+            "insurtech":        "#F5C36A",
+        }
+        sector_key   = str(row.get("sector", "")).lower()
+        sector_color = SECTOR_BORDER.get(sector_key, "#D4D5CE")
+
+        _MLBL = "font-size:11px;font-weight:600;color:#2C2C2A;letter-spacing:.06em;text-transform:uppercase;margin-bottom:2px"
+        _MVAL = "font-size:18px;font-weight:800"
+        _MSUB = f"font-size:10px;color:{MUTED};margin-top:1px"
+        _MPAD = "padding:8px 0"
+
         with col:
             with st.container(border=True):
+                # ── Sector color bar ──────────────────────────────────────
+                st.markdown(
+                    f"<div style='height:4px;background:{sector_color};"
+                    f"border-radius:4px 4px 0 0;margin:-8px -8px 12px -8px'></div>",
+                    unsafe_allow_html=True,
+                )
+
                 # ── Header: name + sector tag ─────────────────────────────
                 st.markdown(
                     f"<div style='display:flex;justify-content:space-between;"
                     f"align-items:flex-start;margin-bottom:2px'>"
                     f"<div>"
-                    f"<div style='font-size:16px;font-weight:800;color:{BLACK};"
+                    f"<div style='font-size:19px;font-weight:800;color:{BLACK};"
                     f"letter-spacing:-0.3px;line-height:1.2'>{name}</div>"
-                    f"<div style='font-size:10px;font-weight:600;color:{MUTED};"
+                    f"<div style='font-size:12px;font-weight:600;color:{BLACK};"
                     f"text-transform:uppercase;letter-spacing:.06em;margin-top:2px'>"
                     f"{country}</div>"
                     f"</div>"
                     f"<span style='background:{BLUE};color:{BLACK};border-radius:99px;"
-                    f"padding:3px 10px;font-size:10px;font-weight:700;"
+                    f"padding:4px 12px;font-size:11px;font-weight:700;"
                     f"letter-spacing:.04em;white-space:nowrap;flex-shrink:0;"
                     f"margin-left:8px;margin-top:2px'>{sl}</span>"
                     f"</div>",
@@ -3321,31 +3373,35 @@ if st.session_state.page == "home":
 
                 with m1:
                     st.markdown(
-                        f"<div style='font-size:9px;font-weight:700;letter-spacing:.12em;"
-                        f"text-transform:uppercase;color:{MUTED};margin-bottom:1px'>LTM Revenue</div>"
-                        f"<div style='font-size:15px;font-weight:800;color:{BLACK}'>{rev_str}</div>"
-                        f"<div style='font-size:9px;color:{MUTED};margin-top:1px'>{rev_sub}</div>",
+                        f"<div style='{_MPAD}'>"
+                        f"<div style='{_MLBL}'>LTM Revenue</div>"
+                        f"<div style='{_MVAL};color:{BLACK}'>{rev_str}</div>"
+                        f"<div style='{_MSUB}'>{rev_sub}</div>"
+                        f"</div>",
                         unsafe_allow_html=True,
                     )
                 with m2:
                     st.markdown(
-                        f"<div style='font-size:9px;font-weight:700;letter-spacing:.12em;"
-                        f"text-transform:uppercase;color:{MUTED};margin-bottom:1px'>Gross Margin</div>"
-                        f"<div style='font-size:15px;font-weight:800;color:{gm_color}'>{gm_str}</div>",
+                        f"<div style='{_MPAD}'>"
+                        f"<div style='{_MLBL}'>Gross Margin</div>"
+                        f"<div style='{_MVAL};color:{gm_color}'>{gm_str}</div>"
+                        f"</div>",
                         unsafe_allow_html=True,
                     )
                 with m3:
                     st.markdown(
-                        f"<div style='font-size:9px;font-weight:700;letter-spacing:.12em;"
-                        f"text-transform:uppercase;color:{MUTED};margin-bottom:1px'>Rev Growth</div>"
-                        f"<div style='font-size:15px;font-weight:800;color:{gcol}'>{gtxt}</div>",
+                        f"<div style='{_MPAD}'>"
+                        f"<div style='{_MLBL}'>Rev Growth</div>"
+                        f"<div style='{_MVAL};color:{gcol}'>{gtxt}</div>"
+                        f"</div>",
                         unsafe_allow_html=True,
                     )
                 with m4:
                     st.markdown(
-                        f"<div style='font-size:9px;font-weight:700;letter-spacing:.12em;"
-                        f"text-transform:uppercase;color:{MUTED};margin-bottom:1px'>{lbl3}</div>"
-                        f"<div style='font-size:15px;font-weight:800;color:{col3}'>{val3}</div>",
+                        f"<div style='{_MPAD}'>"
+                        f"<div style='{_MLBL}'>{lbl3}</div>"
+                        f"<div style='{_MVAL};color:{col3}'>{val3}</div>"
+                        f"</div>",
                         unsafe_allow_html=True,
                     )
 
@@ -3354,7 +3410,7 @@ if st.session_state.page == "home":
 
                 # ── Footer: as of date + view button ─────────────────────
                 st.markdown(
-                    f"<div style='font-size:9px;color:{MUTED};font-weight:600;"
+                    f"<div style='font-size:11px;color:#93A3A1;font-weight:600;"
                     f"letter-spacing:.06em;margin-bottom:4px'>As of {asof}</div>",
                     unsafe_allow_html=True,
                 )
