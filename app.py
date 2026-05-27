@@ -107,8 +107,10 @@ st.markdown(f"""
       background: #EFF0EA !important;
   }}
 
-  /* Suppress spell-check red underlines in markdown containers */
+  /* Suppress spell-check red underlines */
   div[data-testid="stMarkdownContainer"] {{ -webkit-user-modify: read-only; }}
+  div[data-testid="stMarkdownContainer"] p {{ -webkit-spell-check: false !important; }}
+  input, textarea, [contenteditable] {{ spellcheck: false !important; }}
 
   /* Filter radio spacing */
   div[data-testid="stRadio"] {{ margin-bottom: 0px !important; margin-top: 0px !important; }}
@@ -3346,11 +3348,10 @@ if st.session_state.page == "home":
         # LTM revenue
         rev_str = fmt_usd(ltm_val)
         if ltm_lbl == "LTM":
-            basis     = "12 mo." if pt == "monthly" else "4 qtrs." if pt == "quarterly" else "annual"
-            rev_sub   = f"LTM · {basis}"
+            rev_sub   = ""
             rev_label = "LTM REVENUE"
         elif ltm_lbl == "ARR (est.)":
-            rev_sub   = "ARR (est.)"
+            rev_sub   = "ARR · est."
             rev_label = "ARR REVENUE (EST.)"
         else:
             rev_sub   = ""
