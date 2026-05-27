@@ -73,6 +73,8 @@ st.markdown(f"""
   div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] {{
       gap: 14px !important;
   }}
+
+  div[role="radiogroup"] label p {{ color: #2C2C2A !important; font-weight: 600 !important; }}
 </style>
 """, unsafe_allow_html=True)
 
