@@ -68,6 +68,11 @@ st.markdown(f"""
 
   [data-testid="stDataFrame"] {{ border-radius:10px; overflow:hidden; }}
   hr {{ border-color:{BORDER}; margin:1.2rem 0; }}
+
+  /* Card grid spacing */
+  div[data-testid="stVerticalBlock"] > div[data-testid="stHorizontalBlock"] {{
+      gap: 14px !important;
+  }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -181,7 +186,11 @@ def load_companies() -> pd.DataFrame:
                k.period_end_date,
                k.customer_count,
                k.aum_usd,
-               k.gmv_usd
+               k.gmv_usd,
+               k.tpv_usd,
+               k.npl_rate_pct,
+               k.par_30_pct,
+               k.loan_book_gross_usd
         FROM companies c
         LEFT JOIN kpi_snapshots k
             ON k.company_id = c.id
@@ -1989,178 +1998,204 @@ if st.session_state.page == "home":
     col4.metric("Avg EBITDA Margin",   fmt_pct(ltm_em_col.mean()))
 
     st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Filter bar ────────────────────────────────────────────────────────────
+    all_sectors = sorted(companies["sector"].dropna().unique().tolist())
+    sector_options = ["All"] + [sector_label(s) for s in all_sectors]
+
+    filter_col, sort_col = st.columns([4, 1])
+    with filter_col:
+        selected_sector = st.radio(
+            "Filter by sector",
+            options=sector_options,
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+    with sort_col:
+        sort_by = st.selectbox(
+            "Sort",
+            ["Name", "LTM Revenue", "Rev Growth"],
+            label_visibility="collapsed",
+        )
+
+    # Apply sector filter
+    filtered = companies.copy()
+    if selected_sector != "All":
+        filtered = filtered[filtered["sector"].apply(sector_label) == selected_sector]
+
+    # Apply sort
+    if sort_by == "LTM Revenue":
+        filtered = filtered.sort_values("ltm_revenue", ascending=False, na_position="last")
+    elif sort_by == "Rev Growth":
+        filtered = filtered.sort_values("revenue_growth_pct", ascending=False, na_position="last")
+    else:
+        filtered = filtered.sort_values("name")
+
+    n_showing = len(filtered)
     st.markdown(
-        f"### Portfolio Companies &nbsp;"
-        f"<small style='color:{MUTED};font-size:13px;font-weight:400'>Click a company to explore</small>",
+        f"<div style='font-size:11px;color:{MUTED};letter-spacing:.04em;"
+        f"margin-bottom:14px'>{n_showing} of {len(companies)} companies</div>",
         unsafe_allow_html=True,
     )
 
-    # ── Column headers ────────────────────────────────────────────────────────
-    COLS = [2.5, 1.8, 1.7, 1.3, 1.3, 1.3, 1.2]
-    HDRS = ["Company", "Sector / HQ", "LTM Revenue (USD)",
-            "Gross Margin", "EBITDA Margin", "Rev Growth", "As of"]
+    # ── Card grid — 3 columns ─────────────────────────────────────────────────
+    def _sector_metric_pair(row: pd.Series) -> tuple[tuple, tuple]:
+        """Return two (label, value, color) tuples for the sector-specific bottom row."""
+        sector = str(row.get("sector", "")).lower()
 
-    h = st.columns(COLS)
-    for col, lbl in zip(h, HDRS):
-        col.markdown(
-            f"<div style='font-size:11px;text-transform:uppercase;"
-            f"letter-spacing:.6px;color:{MUTED};padding-bottom:4px'>{lbl}</div>",
-            unsafe_allow_html=True,
-        )
-    st.markdown(f"<hr style='margin-top:0'>", unsafe_allow_html=True)
+        def _pct_color(v, positive_is_good=True):
+            if _is_null(v): return MUTED
+            return ("#2E7D32" if float(v) > 0 else "#C62828") if positive_is_good \
+                else ("#C62828" if float(v) > 0 else "#2E7D32")
 
-    # ── Company rows ─────────────────────────────────────────────────────────
-    for _, row in companies.iterrows():
-        r  = st.columns(COLS)
-        sl = sector_label(row["sector"])
-        cid = int(row["id"])
-        company_flags = flags.get(cid, [])
-
-        # Company name + inline flag badges
-        with r[0]:
-            if st.button(row["name"], key=f"co_{row['id']}"):
-                st.session_state.page = "detail"
-                st.session_state.company_id = cid
-                st.rerun()
-            if company_flags:
-                # Show first flag as a small badge; more flags in the bottom section
-                badge = company_flags[0].split("(")[0].strip()
-                more  = f" +{len(company_flags)-1}" if len(company_flags) > 1 else ""
-                st.markdown(
-                    f"<div style='margin-top:-6px'>"
-                    f"<span style='background:{WARN_BG};color:{WARN};border-radius:4px;"
-                    f"padding:1px 6px;font-size:10px;font-weight:600'>"
-                    f"! {badge}{more}</span></div>",
-                    unsafe_allow_html=True,
-                )
-
-        with r[1]:
-            st.markdown(
-                f"<span style='background:{BLUE};border-radius:20px;padding:2px 10px;"
-                f"font-size:11px;font-weight:500;color:{BLACK}'>{sl}</span>"
-                f"&nbsp;<small style='color:{MUTED}'>{row['hq_country']}</small>",
-                unsafe_allow_html=True,
+        if sector == "lending":
+            npl = row.get("npl_rate_pct")
+            loan = row.get("loan_book_gross_usd")
+            return (
+                ("NPL Rate",   fmt_pct(npl),  _pct_color(npl, positive_is_good=False)),
+                ("Loan Book",  fmt_usd(loan), BLACK),
+            )
+        elif sector == "wealth_management":
+            aum = row.get("aum_usd")
+            return (
+                ("AUM",        fmt_usd(aum),  BLACK),
+                ("EBITDA Mgn", fmt_pct(row.get("ltm_ebitda_margin_pct") or row.get("ebitda_margin_pct")),
+                 _pct_color(row.get("ltm_ebitda_margin_pct") or row.get("ebitda_margin_pct"))),
+            )
+        elif sector == "payments":
+            tpv = row.get("tpv_usd") or row.get("gmv_usd")
+            tpv_lbl = "TPV" if not _is_null(row.get("tpv_usd")) else "GMV"
+            return (
+                (tpv_lbl,     fmt_usd(tpv),  BLACK),
+                ("EBITDA Mgn", fmt_pct(row.get("ltm_ebitda_margin_pct") or row.get("ebitda_margin_pct")),
+                 _pct_color(row.get("ltm_ebitda_margin_pct") or row.get("ebitda_margin_pct"))),
+            )
+        elif sector == "insurtech":
+            return (
+                ("EBITDA Mgn", fmt_pct(row.get("ltm_ebitda_margin_pct") or row.get("ebitda_margin_pct")),
+                 _pct_color(row.get("ltm_ebitda_margin_pct") or row.get("ebitda_margin_pct"))),
+                ("Customers",  fmt_int(row.get("customer_count")), BLACK),
+            )
+        else:
+            em = row.get("ltm_ebitda_margin_pct") or row.get("ebitda_margin_pct")
+            cust = row.get("customer_count")
+            return (
+                ("EBITDA Mgn", fmt_pct(em),   _pct_color(em)),
+                ("Customers",  fmt_int(cust),  BLACK),
             )
 
-        with r[2]:
-            ltm_val   = row.get("ltm_revenue")
-            ltm_lbl   = row.get("ltm_label", "")
-            pt        = row.get("period_type", "monthly")
-            n_used    = int(row.get("ltm_periods_used", 0))
-            n_needed  = int(row.get("periods_needed", 12))
+    def _card_html(row: pd.Series) -> str:
+        cid        = int(row["id"])
+        name       = row["name"]
+        sl         = sector_label(row.get("sector", ""))
+        country    = row.get("hq_country", "")
+        ltm_val    = row.get("ltm_revenue")
+        ltm_lbl    = row.get("ltm_label", "")
+        pt         = row.get("period_type", "monthly")
+        period_lbl = fmt_period_label(row.get("period_end_date"), pt)
 
-            if ltm_lbl == "LTM":
-                basis = (
-                    "12 mo." if pt == "monthly"   else
-                    "4 qtrs." if pt == "quarterly" else
-                    "annual"
-                )
-                sub = f"LTM &middot; {basis}"
-            elif ltm_lbl == "ARR (est.)":
-                sub = f"ARR est. &middot; {n_used} of {n_needed}"
-            else:
-                sub = ""
+        # LTM revenue display
+        rev_str = fmt_usd(ltm_val)
+        rev_sub = ""
+        if ltm_lbl == "LTM":
+            basis   = "12 mo." if pt == "monthly" else "4 qtrs." if pt == "quarterly" else "annual"
+            rev_sub = f"LTM · {basis}"
+        elif ltm_lbl == "ARR (est.)":
+            rev_sub = "ARR (est.)"
+        if period_lbl and not _is_null(ltm_val):
+            rev_str += f" <span style='font-size:11px;font-weight:400;color:{MUTED}'>({period_lbl})</span>"
 
-            basis_tag = (
-                f"<div style='font-size:10px;color:{MUTED};margin-top:1px'>({sub})</div>"
-                if (not _is_null(ltm_val) and sub) else ""
-            )
-            period_lbl = fmt_period_label(row.get("period_end_date"), pt)
-            period_sfx = (
-                f"<span style='font-size:13px;color:{MUTED};font-weight:400'> ({period_lbl})</span>"
-                if (period_lbl and not _is_null(ltm_val)) else ""
-            )
-            st.markdown(
-                f"<span style='font-weight:600'>{fmt_usd(ltm_val)}</span>{period_sfx}{basis_tag}",
-                unsafe_allow_html=True,
-            )
+        # Gross margin
+        gm = row.get("ltm_gross_margin_pct")
+        if _is_null(gm): gm = row.get("gross_margin_pct")
+        gm_str   = fmt_pct(gm)
+        gm_color = "#2E7D32" if (not _is_null(gm) and float(gm) > 50) else BLACK
 
-        with r[3]:
-            gm = row.get("ltm_gross_margin_pct")
-            if _is_null(gm):
-                gm = row["gross_margin_pct"]
-            color = "#2E7D32" if (not _is_null(gm) and float(gm) > 50) else BLACK
-            st.markdown(
-                f"<span style='color:{color};font-weight:500'>{fmt_pct(gm)}</span>",
-                unsafe_allow_html=True,
-            )
+        # Revenue growth
+        gtxt, gcol = fmt_growth(row.get("revenue_growth_pct"))
 
-        with r[4]:
-            em = row.get("ltm_ebitda_margin_pct")
-            if _is_null(em):
-                em = row.get("ebitda_margin_pct")
-            color = ("#2E7D32" if (not _is_null(em) and float(em) > 0)
-                     else "#C62828" if (not _is_null(em))
-                     else BLACK)
-            st.markdown(
-                f"<span style='color:{color};font-weight:500'>{fmt_pct(em)}</span>",
-                unsafe_allow_html=True,
-            )
+        # Sector-specific pair
+        (lbl3, val3, col3), (lbl4, val4, col4) = _sector_metric_pair(row)
 
-        with r[5]:
-            gtxt, gcol = fmt_growth(row.get("revenue_growth_pct"))
-            st.markdown(
-                f"<span style='color:{gcol};font-weight:500'>{gtxt}</span>",
-                unsafe_allow_html=True,
-            )
+        # As of
+        asof = as_of(row.get("period_end_date"))
 
-        with r[6]:
-            st.markdown(
-                f"<small style='color:{MUTED}'>{as_of(row['period_end_date'])}</small>",
-                unsafe_allow_html=True,
-            )
+        card = f"""
+<div style="background:{WHITE};border:1px solid {BORDER};border-radius:12px;
+            overflow:hidden;cursor:pointer;height:100%">
+  <div style="padding:16px 16px 10px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div>
+        <div style="font-size:16px;font-weight:800;color:{BLACK};letter-spacing:-0.3px">{name}</div>
+        <div style="font-size:10px;font-weight:600;color:{MUTED};margin-top:2px;
+                    letter-spacing:.06em;text-transform:uppercase">{country}</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;margin-left:8px">
+        <span style="background:{BLUE};color:{BLACK};border-radius:99px;
+                     padding:2px 10px;font-size:10px;font-weight:700;
+                     letter-spacing:.04em;white-space:nowrap">{sl}</span>
+      </div>
+    </div>
+  </div>
 
-        st.markdown(f"<hr style='margin:0;border-color:{BORDER}'>", unsafe_allow_html=True)
+  <div style="height:1px;background:{BORDER};margin:0 16px"></div>
 
-    # ── Methodology note ──────────────────────────────────────────────────────
-    st.markdown(
-        f"<div style='color:{MUTED};font-size:11px;margin-top:10px;"
-        f"background:{WHITE};border:1px solid {BORDER};border-radius:8px;"
-        f"padding:10px 14px;line-height:1.6'>"
-        f"<b>LTM Revenue</b> &mdash; Last Twelve Months: sum of the most recent 12 monthly periods "
-        f"(or 4 quarterly / 1 annual) so all companies are on a comparable full-year basis. "
-        f"Companies with fewer than 12 months of history show an annualised run-rate labelled "
-        f"<i>ARR (est.)</i>. Reported figures (not annualised) are shown on the company detail page."
-        f"<br><b>Rev Growth</b> &mdash; period-over-period change between the two most recent "
-        f"available revenue data points."
-        f"</div>",
-        unsafe_allow_html=True,
-    )
+  <div style="padding:10px 16px 6px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0">
 
-    # ── Data quality flags section ────────────────────────────────────────────
-    all_flags = {cid: fl for cid, fl in flags.items() if fl}
-    if all_flags:
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div style='font-size:13px;font-weight:700;color:{BLACK};"
-            f"letter-spacing:.3px;margin-bottom:6px'>DATA QUALITY FLAGS</div>",
-            unsafe_allow_html=True,
-        )
-        name_map = {int(r["id"]): r["name"] for _, r in companies.iterrows()}
+      <div style="padding:6px 0">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+                    color:{MUTED};margin-bottom:2px">LTM Revenue</div>
+        <div style="font-size:15px;font-weight:800;color:{BLACK}">{rev_str}</div>
+        <div style="font-size:9px;color:{MUTED};margin-top:1px">{rev_sub}</div>
+      </div>
 
-        rows_html = ""
-        for cid, fl_list in sorted(all_flags.items(), key=lambda x: name_map.get(x[0], "")):
-            company_name = name_map.get(cid, f"ID {cid}")
-            badges = " ".join(
-                f"<span style='background:{WARN_BG};color:{WARN};border-radius:4px;"
-                f"padding:2px 8px;font-size:11px;font-weight:600;margin-right:4px'>{f}</span>"
-                for f in fl_list
-            )
-            rows_html += (
-                f"<tr>"
-                f"<td style='padding:6px 12px 6px 0;font-weight:600;white-space:nowrap;"
-                f"color:{BLACK};width:140px'>{company_name}</td>"
-                f"<td style='padding:6px 0'>{badges}</td>"
-                f"</tr>"
-            )
+      <div style="padding:6px 0">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+                    color:{MUTED};margin-bottom:2px">Gross Margin</div>
+        <div style="font-size:15px;font-weight:800;color:{gm_color}">{gm_str}</div>
+      </div>
 
-        st.markdown(
-            f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:8px;"
-            f"padding:12px 16px'>"
-            f"<table style='width:100%;border-collapse:collapse'>{rows_html}</table>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
+      <div style="padding:6px 0">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+                    color:{MUTED};margin-bottom:2px">Rev Growth</div>
+        <div style="font-size:15px;font-weight:800;color:{gcol}">{gtxt}</div>
+      </div>
+
+      <div style="padding:6px 0">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+                    color:{MUTED};margin-bottom:2px">{lbl3}</div>
+        <div style="font-size:15px;font-weight:800;color:{col3}">{val3}</div>
+      </div>
+
+    </div>
+  </div>
+
+  <div style="height:1px;background:{BORDER};margin:0 16px"></div>
+
+  <div style="padding:8px 16px 12px;display:flex;justify-content:space-between;align-items:center">
+    <div style="font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+                color:{MUTED}">Exit Readiness</div>
+    <div style="font-size:9px;font-weight:600;color:{MUTED}">{asof}</div>
+  </div>
+</div>"""
+        return card
+
+    # Render cards in rows of 3
+    rows_iter = list(filtered.iterrows())
+    for i in range(0, len(rows_iter), 3):
+        chunk = rows_iter[i:i+3]
+        cols  = st.columns(3)
+        for col, (_, row) in zip(cols, chunk):
+            cid = int(row["id"])
+            with col:
+                st.markdown(_card_html(row), unsafe_allow_html=True)
+                if st.button("View →", key=f"co_{cid}", use_container_width=True):
+                    st.session_state.page = "detail"
+                    st.session_state.company_id = cid
+                    st.rerun()
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
     # ── LTM summary table (printed to console; also shown as expander) ────────
     with st.expander("LTM Revenue & data quality summary (all companies)"):
