@@ -968,7 +968,114 @@ def render_benchmarking_tab(
         st.plotly_chart(fig_r, use_container_width=True, config={"displayModeBar": False})
 
     # ── Section 3: Implied exit value card (sector-aware) ─────────────────────
-    if ltm_val is not None and comp_rev is not None and comp_rev > 0:
+    if company_name == "Yoco" and ltm_val is not None:
+        ltm_revenue = ltm_val  # already in raw USD from caller
+
+        def _sh_val(text):
+            st.markdown(
+                f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+                f"margin:20px 0 6px 0;letter-spacing:.3px'>{text}</div>",
+                unsafe_allow_html=True,
+            )
+
+        _sh_val("Implied Valuation Range")
+        st.markdown(
+            f"<div style='font-size:12px;color:{MUTED};margin-bottom:16px'>"
+            f"Based on Bruwer ISP analysis and comparable exit multiples. "
+            f"LTM Revenue: {fmt_usd(ltm_revenue)}</div>",
+            unsafe_allow_html=True,
+        )
+
+        HDR = (
+            f"font-size:10px;font-weight:700;color:#93A3A1;"
+            f"text-transform:uppercase;letter-spacing:.5px"
+        )
+        hcols = st.columns([2, 1, 1, 1, 2])
+        for hc, lbl in zip(hcols, ["Pathway", "Multiple", "Low Case", "Base Case", "High Case"]):
+            with hc:
+                st.markdown(f"<div style='{HDR}'>{lbl}</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div style='height:2px;background:{BORDER};margin:6px 0 10px'></div>",
+            unsafe_allow_html=True,
+        )
+
+        def _val_row(pathway_name, tag, tag_bg, tag_fg, multiple_lbl,
+                     low, base, high, base_color, note):
+            cols = st.columns([2, 1, 1, 1, 2])
+            with cols[0]:
+                st.markdown(
+                    f"<div style='font-size:14px;font-weight:700;color:{BLACK};padding-top:4px'>"
+                    f"{pathway_name}</div>"
+                    f"<span style='font-size:11px;font-weight:600;background:{tag_bg};color:{tag_fg};"
+                    f"border-radius:4px;padding:2px 7px'>{tag}</span>",
+                    unsafe_allow_html=True,
+                )
+            with cols[1]:
+                st.markdown(
+                    f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{multiple_lbl}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[2]:
+                st.markdown(
+                    f"<div style='font-size:14px;color:{BLACK};padding-top:6px'>{fmt_usd(low)}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[3]:
+                st.markdown(
+                    f"<div style='font-size:14px;font-weight:700;color:{base_color};padding-top:6px'>"
+                    f"{fmt_usd(base)}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[4]:
+                st.markdown(
+                    f"<div style='font-size:14px;color:{MUTED};padding-top:6px'>Up to {fmt_usd(high)}</div>",
+                    unsafe_allow_html=True,
+                )
+            st.markdown(
+                f"<div style='font-size:11px;color:{MUTED};font-style:italic;margin:4px 0 8px'>{note}</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(f"<hr style='border-color:{BORDER};margin:8px 0'>", unsafe_allow_html=True)
+
+        r = ltm_revenue
+        _val_row(
+            "Local Strategic Sale",
+            "Most likely — 12–24 months", GREEN, BLACK,
+            "2–4x Revenue",
+            r * 2, r * 3, r * 5,
+            "#2E7D32",
+            "Consistent with iKhokha ($94M at 4–5x) and TymeBank–Retail Capital ($85–90M at ~2.5x). "
+            "SA bank/telco deals capped below $400M.",
+        )
+        _val_row(
+            "Global Strategic Sale",
+            "Low feasibility", "#D4D5CE", BLACK,
+            "8–13x Revenue",
+            r * 8, r * 10, r * 13,
+            "#1565C0",
+            "Consistent with iZettle–PayPal ($2.2B at 13x) and Paystack–Stripe ($200–250M). "
+            "Requires profitability and pan-African narrative.",
+        )
+        _val_row(
+            "Remain Independent",
+            "Unattractive", "#D4D5CE", BLACK,
+            "2–3x Revenue",
+            r * 2, r * 2.5, r * 3,
+            BLACK,
+            "SA independents rarely exceed $300M. Growth ceiling as banks and telcos consolidate.",
+        )
+
+        st.markdown(
+            f"<div style='background:{BG};border-radius:8px;padding:12px 16px;"
+            f"font-size:11px;color:{MUTED};margin-top:8px'>"
+            f"Valuation ranges are indicative and based on comparable transaction multiples from "
+            f"Bruwer ISP exit analysis (May 2026). Actual exit valuation will depend on buyer appetite, "
+            f"competitive dynamics, profitability trajectory, and market conditions at time of exit."
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    elif ltm_val is not None and comp_rev is not None and comp_rev > 0:
         sector = str(info.get("sector", "")).lower()
 
         # ── derive the latest non-null value for a kpis column ───────────────
