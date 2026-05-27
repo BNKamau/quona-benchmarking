@@ -364,22 +364,25 @@ def load_ltm_revenue() -> pd.DataFrame:
 
 @st.cache_data(ttl=300)
 def load_ltm_volume() -> pd.DataFrame:
-    """Sum of tpv_usd and gmv_usd across the last 12 monthly periods per company."""
-    return pd.read_sql_query("""
-        SELECT company_id AS id,
-               SUM(tpv_usd) AS ltm_tpv_usd,
-               SUM(gmv_usd) AS ltm_gmv_usd
-        FROM (
-            SELECT company_id, tpv_usd, gmv_usd,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY company_id ORDER BY period_end_date DESC
-                   ) AS rn
-            FROM kpi_snapshots
-            WHERE period_type = 'monthly'
-        ) ranked
-        WHERE rn <= 12
-        GROUP BY company_id
-    """, _conn())
+    """Compute LTM TPV and GMV per company using Python instead of SQL window functions."""
+    query = """
+        SELECT company_id, tpv_usd, gmv_usd, period_end_date
+        FROM kpi_snapshots
+        WHERE tpv_usd IS NOT NULL OR gmv_usd IS NOT NULL
+        ORDER BY company_id, period_end_date DESC
+    """
+    df = pd.read_sql_query(query, _conn())
+
+    results = []
+    for company_id, group in df.groupby('company_id'):
+        last_12 = group.head(12)
+        results.append({
+            'id': company_id,
+            'ltm_tpv_usd': last_12['tpv_usd'].sum() if last_12['tpv_usd'].notna().any() else None,
+            'ltm_gmv_usd': last_12['gmv_usd'].sum() if last_12['gmv_usd'].notna().any() else None,
+        })
+
+    return pd.DataFrame(results) if results else pd.DataFrame(columns=['id', 'ltm_tpv_usd', 'ltm_gmv_usd'])
 
 @st.cache_data(ttl=300)
 def load_all_revenue() -> pd.DataFrame:
