@@ -2215,51 +2215,49 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
                 file_bytes = uploaded.read()
                 all_rows   = PARSERS[company_name](file_bytes)
 
-                existing = _existing_periods(company_id)
-                new_rows = [r for r in all_rows if r["period_end_date"] not in existing]
-                skipped  = len(all_rows) - len(new_rows)
+                existing         = _existing_periods(company_id)
+                existing_in_file = sum(1 for r in all_rows if r["period_end_date"] in existing)
 
                 st.session_state[ss_fkey]   = file_key
-                st.session_state[ss_parsed] = new_rows
-                st.session_state[ss_skip]   = skipped
+                st.session_state[ss_parsed] = all_rows        # all rows; upsert handles insert vs update
+                st.session_state[ss_skip]   = existing_in_file  # periods that will be updated
             except Exception as exc:
                 st.error(f"Parse error: {exc}")
                 return
 
-    # Safety net: re-filter cached results against the live DB in case the
-    # same file key is reused after a save (shouldn't happen with the fkey
-    # invalidation above, but guards against any edge case).
-    cached_rows = st.session_state.get(ss_parsed, [])
-    existing    = _existing_periods(company_id)
-    new_rows    = [r for r in cached_rows if r["period_end_date"] not in existing]
-    if len(new_rows) != len(cached_rows):
-        st.session_state[ss_parsed] = new_rows   # keep cache in sync
-    skipped = st.session_state.get(ss_skip, 0)
+    cached_rows  = st.session_state.get(ss_parsed, [])
+    existing     = _existing_periods(company_id)
+    new_rows     = [r for r in cached_rows if r["period_end_date"] not in existing]
+    update_rows  = [r for r in cached_rows if r["period_end_date"] in existing]
+    skipped      = st.session_state.get(ss_skip, 0)
 
     if skipped:
         st.markdown(
             f"<div style='color:{MUTED};font-size:12px;margin-bottom:8px'>"
-            f"{skipped} period(s) already in database — skipped.</div>",
+            f"{skipped} period(s) already in database — will be updated with new values.</div>",
             unsafe_allow_html=True,
         )
 
-    if not new_rows:
+    if not cached_rows:
         st.markdown(
             f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
             f"padding:28px;text-align:center;color:{MUTED};font-size:13px'>"
-            f"All periods in this file are already in the database. No new data to import.</div>",
+            f"No period data found in this file.</div>",
             unsafe_allow_html=True,
         )
         return
 
     # ── PREVIEW TABLE ─────────────────────────────────────────────────────────
+    _preview_label = f"{len(new_rows)} new period(s)"
+    if update_rows:
+        _preview_label += f" + {len(update_rows)} update(s)"
+    _preview_label += " — review before saving"
     st.markdown(
         f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
-        f"color:{MUTED};font-weight:600;margin-bottom:10px'>"
-        f"{len(new_rows)} new period(s) found — review before saving</div>",
+        f"color:{MUTED};font-weight:600;margin-bottom:10px'>{_preview_label}</div>",
         unsafe_allow_html=True,
     )
-    st.dataframe(_build_preview_df(new_rows), use_container_width=True, hide_index=True)
+    st.dataframe(_build_preview_df(cached_rows), use_container_width=True, hide_index=True)
 
     # ── CONFIRM BUTTON ────────────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
@@ -2272,22 +2270,22 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
     with note_col:
         st.markdown(
             f"<div style='padding-top:8px;font-size:12px;color:{MUTED}'>"
-            f"Saves {len(new_rows)} period(s) for {company_name}. "
-            f"Existing periods are not overwritten.</div>",
+            f"Saves {len(cached_rows)} period(s) for {company_name}. "
+            f"Existing periods will be updated with new values.</div>",
             unsafe_allow_html=True,
         )
 
     if confirm:
-        with st.spinner(f"Saving {len(new_rows)} period(s) to database…"):
-            for p in new_rows:
+        with st.spinner(f"Saving {len(cached_rows)} period(s) to database…"):
+            for p in cached_rows:
                 _upsert_kpi(company_id, p)
 
         with st.spinner("Generating AI commentary…"):
             commentary = _generate_commentary(
-                company_name, str(info.get("sector", "")), new_rows
+                company_name, str(info.get("sector", "")), cached_rows
             )
 
-        st.session_state[ss_snap]       = list(new_rows)   # snapshot for success display
+        st.session_state[ss_snap]       = list(cached_rows)  # snapshot for success display
         st.session_state[ss_commentary] = commentary
         st.session_state[ss_saved]      = True
         # Invalidate the file key cache so re-uploading the same file will
