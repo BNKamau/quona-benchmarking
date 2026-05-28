@@ -122,14 +122,20 @@ def parse_yoco(file_bytes: bytes) -> list[dict]:
     row_eop = find_row(ws, "End of Period Base",       label_col=1)
     row_mam = find_row(ws, "Monthly Active Merchants", label_col=1)
 
-    # EBITDA: exact labels first to avoid matching "EBITDA Margin" rows
+    # EBITDA: match "EBITDA - Actuals" (actual label in file) first, then generic variants
     row_ebitda = _first_row(
-        "EBITDA", "Adjusted EBITDA", "Total EBITDA", "Group EBITDA",
+        "EBITDA - Actuals", "EBITDA - Actual",
+        ws=ws, label_col=1, exact=True,
+    ) or _first_row(
+        "Adjusted EBITDA", "Total EBITDA", "Group EBITDA", "EBITDA",
         ws=ws, label_col=1, exact=True,
     )
 
-    # Net income: try common label variants
+    # Net income: match "Net Profit - Actuals" (actual label in file) first, then generic variants
     row_net = _first_row(
+        "Net Profit - Actuals", "Net Profit - Actual", "Net Income - Actuals",
+        ws=ws, label_col=1, exact=True,
+    ) or _first_row(
         "Net Income", "Net Profit", "PAT", "Profit After Tax",
         "Net Profit/(Loss)", "Net Loss", "Profit / (Loss) After Tax",
         ws=ws, label_col=1, exact=True,
@@ -139,6 +145,7 @@ def parse_yoco(file_bytes: bytes) -> list[dict]:
     row_cogs = None
     if row_gp is None:
         row_cogs = _first_row(
+            "Cost of Sales - Actuals", "Cost of Sales - Actual",
             "Transaction Costs", "Cost of Revenue", "Cost of Goods Sold", "COGS",
             ws=ws, label_col=1, exact=True,
         )
