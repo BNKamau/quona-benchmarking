@@ -1226,7 +1226,7 @@ def render_benchmarking_tab(
             "Requires profitability and pan-African narrative.",
         )
         _val_row(
-            "Remain Independent",
+            "Remain Independent — Quona Pursues Secondaries",
             "Unattractive", "#D4D5CE", BLACK,
             "2–3x Revenue",
             r * 2, r * 2.5, r * 3,
