@@ -2797,7 +2797,9 @@ def _render_yoco_exit_tab() -> None:
     with _sync_btn_col:
         if st.button("Sync Affinity", key="yoco_affinity_sync"):
             _api_key = st.secrets.get("AFFINITY_API_KEY", "")
-            all_names = [b[0] for b in local_buyers] + [g[0] for g in global_buyers]
+            all_names = list(dict.fromkeys(
+                [b[0] for b in local_buyers] + [g[0] for g in global_buyers] + [s[0] for s in secondaries_buyers]
+            ))
             with st.spinner("Fetching Affinity data for all buyers…"):
                 st.session_state["yoco_affinity_data"] = {
                     bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
@@ -2833,7 +2835,7 @@ def _render_yoco_exit_tab() -> None:
         _header_row()
         for idx, (name, fit, activity, rationale) in enumerate(secondaries_buyers):
             key = "engage_yoco_sec_" + name.replace(" ", "")
-            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx, affinity_override="—")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
