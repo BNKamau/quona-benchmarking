@@ -2677,7 +2677,7 @@ def _render_yoco_exit_tab() -> None:
         return (f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:600;"
                 f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>")
 
-    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0):
+    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0, affinity_override=None):
         row_bg = "#EFF0EA" if row_idx % 2 == 0 else "#FFFFFF"
         with st.container():
             st.markdown(
@@ -2704,7 +2704,12 @@ def _render_yoco_exit_tab() -> None:
             with cols[3]:
                 st.checkbox("", key=key)
             with cols[4]:
-                if affinity_cache is None:
+                if affinity_override is not None:
+                    st.markdown(
+                        f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{affinity_override}</div>",
+                        unsafe_allow_html=True,
+                    )
+                elif affinity_cache is None:
                     st.markdown(
                         f"<div style='font-size:11px;color:{MUTED};padding-top:8px'>Sync Affinity above</div>",
                         unsafe_allow_html=True,
@@ -2770,6 +2775,23 @@ def _render_yoco_exit_tab() -> None:
          "Real-time merchant data overlap with existing bank and telco feeds."),
     ]
 
+    secondaries_buyers = [
+        ("Telkom",                     "High",   "Launched Yep SME marketplace, building merchant payments from scratch",
+         "Yoco's 110k merchant network solves exactly what Telkom is trying to build"),
+        ("Experian",                   "Medium", "Launched ExperiFin AI credit marketplace for SMEs in 2025",
+         "Yoco's SME transaction data complements their credit bureau play"),
+        ("Google Africa Investment Fund", "Medium", "Invested in Moniepoint Series C (2025) alongside Visa and IFC",
+         "Mirrors their pattern of minority stakes in leading African fintechs"),
+        ("Alphacode",                  "High",   "$80M deployed across SA fintechs, latest deal August 2025",
+         "RMI/FNB relationships make them a natural bridge to a local bank exit"),
+        ("Blue Earth Capital",         "High",   "GP-led secondary in Moniepoint (Oct 2025), dedicated Africa secondaries strategy launched 2024",
+         "Actively building the African secondaries market, Yoco is a perfect fit"),
+        ("Norrsken22",                 "Medium", "Backed Stitch and TymeBank, $205M fund actively deploying",
+         "Deepens SA fintech exposure with a de-risked, revenue-generating asset"),
+        ("Partech",                    "Medium", "Closed €280M second Africa fund in 2024, top Series A/B investor in 2025",
+         "Leading SA merchant payments platform at a point when comparable exits are validating the market"),
+    ]
+
     affinity_cache = st.session_state.get("yoco_affinity_data")
     _, _sync_btn_col = st.columns([6, 1])
     with _sync_btn_col:
@@ -2796,7 +2818,7 @@ def _render_yoco_exit_tab() -> None:
                 st.markdown(f"<div style='{_HDR_STYLE}'>{lbl}</div>", unsafe_allow_html=True)
         st.markdown("<div style='height:2px;background:#EFF0EA;margin-bottom:8px'></div>", unsafe_allow_html=True)
 
-    tab_local, tab_global = st.tabs(["Local Buyers", "Global Buyers"])
+    tab_local, tab_global, tab_sec = st.tabs(["Local Buyers", "Global Buyers", "Secondaries Buyers"])
     with tab_local:
         _header_row()
         for idx, (name, fit, activity, rationale) in enumerate(local_buyers):
@@ -2807,6 +2829,11 @@ def _render_yoco_exit_tab() -> None:
         for idx, (name, fit, activity, rationale) in enumerate(global_buyers):
             key = "engage_yoco_" + name.replace(" ", "")
             _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+    with tab_sec:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(secondaries_buyers):
+            key = "engage_yoco_sec_" + name.replace(" ", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx, affinity_override="—")
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
