@@ -134,7 +134,10 @@ st.markdown(f"""
 DB_PATH = "benchmarking.db"
 
 def _conn():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
 
 def _init_exit_tables() -> None:
     conn = _conn()
@@ -454,21 +457,25 @@ def load_company_info(company_id: int) -> pd.Series:
 
 @st.cache_data(ttl=300)
 def load_kpis(company_id: int) -> pd.DataFrame:
-    df = pd.read_sql_query("""
-        SELECT period_end_date,
-               revenue_usd, gross_margin_pct,
-               ebitda_usd, ebitda_margin_pct,
-               arr_usd, mrr_usd,
-               customer_count, active_clients_count,
-               net_revenue_retention_pct, cac_usd, ltv_usd,
-               loan_book_gross_usd, par_30_pct, par_90_pct,
-               npl_rate_pct, net_yield_pct, nim_pct,
-               aum_usd, gmv_usd, tpv_usd,
-               unique_borrowers_count
-        FROM kpi_snapshots
-        WHERE company_id = ?
-        ORDER BY period_end_date
-    """, _conn(), params=(company_id,))
+    conn = _conn()
+    try:
+        df = pd.read_sql_query("""
+            SELECT period_end_date,
+                   revenue_usd, gross_margin_pct,
+                   ebitda_usd, ebitda_margin_pct,
+                   arr_usd, mrr_usd,
+                   customer_count, active_clients_count,
+                   net_revenue_retention_pct, cac_usd, ltv_usd,
+                   loan_book_gross_usd, par_30_pct, par_90_pct,
+                   npl_rate_pct, net_yield_pct, nim_pct,
+                   aum_usd, gmv_usd, tpv_usd,
+                   unique_borrowers_count
+            FROM kpi_snapshots
+            WHERE company_id = ?
+            ORDER BY period_end_date
+        """, conn, params=(company_id,))
+    finally:
+        conn.close()
     df["period_end_date"] = pd.to_datetime(df["period_end_date"])
     mask = (
         df["ebitda_margin_pct"].isna()
@@ -479,6 +486,26 @@ def load_kpis(company_id: int) -> pd.DataFrame:
         df.loc[mask, "ebitda_usd"] / df.loc[mask, "revenue_usd"] * 100
     ).round(2)
     return df
+
+
+def _kpi_last_updated(company_id: int) -> str:
+    """Read MAX(updated_at) directly from DB — not cached, always fresh."""
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT MAX(updated_at) FROM kpi_snapshots WHERE company_id=?",
+            (company_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    ts = row[0] if row and row[0] else None
+    if not ts:
+        return "unknown"
+    try:
+        dt = datetime.fromisoformat(ts)
+        return dt.strftime("%d %b %Y %H:%M") + " UTC"
+    except Exception:
+        return ts
 
 # ── Formatters ─────────────────────────────────────────────────────────────────
 def _is_null(v) -> bool:
@@ -1791,7 +1818,7 @@ def render_benchmarking_tab(
 # ── DB write helpers ──────────────────────────────────────────────────────────
 
 def _existing_periods(company_id: int) -> set[str]:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = _conn()
     rows = conn.execute(
         "SELECT period_end_date FROM kpi_snapshots WHERE company_id = ?",
         (company_id,),
@@ -1801,7 +1828,7 @@ def _existing_periods(company_id: int) -> set[str]:
 
 
 def _upsert_kpi(company_id: int, data: dict) -> None:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = _conn()
     now    = datetime.utcnow().isoformat()
     period = data["period_end_date"]
 
@@ -2291,7 +2318,16 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
         # Invalidate the file key cache so re-uploading the same file will
         # trigger a fresh parse+dedup (not reuse stale ss_parsed).
         st.session_state.pop(ss_fkey, None)
-        st.cache_data.clear()
+        # Clear only the KPI read caches so fresh DB values are loaded on rerun.
+        # Using per-function clear instead of st.cache_data.clear() to avoid
+        # racing with other in-flight cache populations.
+        load_kpis.clear()
+        load_ltm_revenue.clear()
+        load_ltm_volume.clear()
+        load_all_revenue.clear()
+        load_companies.clear()
+        load_revenue_growth.clear()
+        load_company_info.clear()
         st.rerun()
 
 
@@ -3634,6 +3670,14 @@ elif st.session_state.page == "detail":
     tab_upload  = _tabs[3] if _has_upload else None
 
     with tab_perf:
+        # ── Last-updated stamp (reads directly from DB, not cache) ─────────────
+        _last_ts = _kpi_last_updated(company_id)
+        st.markdown(
+            f"<div style='text-align:right;font-size:11px;color:{MUTED};"
+            f"margin-bottom:4px'>Data last updated: <b>{_last_ts}</b></div>",
+            unsafe_allow_html=True,
+        )
+
         # ── Chart palette ─────────────────────────────────────────────────────
         C_REVENUE  = "#378ADD"
         C_GM       = "#1D9E75"
