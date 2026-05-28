@@ -2627,6 +2627,7 @@ def _render_yoco_exit_tab() -> None:
 <div style='background:#FFFFFF;border:1px solid #D4D5CE;{border_extra}border-radius:8px;
      padding:16px;height:100%'>
   <div style='font-size:14px;font-weight:700;color:#2C2C2A;margin-bottom:4px'>{title}</div>
+  <div style='font-size:10px;color:#93A3A1;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px'>Valuation</div>
   <div style='font-size:13px;color:#2C2C2A'>{valuation[0]}</div>
   {rev_line}
   <div style='font-size:12px;color:#93A3A1;font-style:italic;margin:6px 0 8px'>{description}</div>
