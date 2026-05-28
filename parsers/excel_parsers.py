@@ -12,7 +12,7 @@ from datetime import date, datetime
 
 import openpyxl
 
-FX_ZAR: float = 18.3
+FX_ZAR: float = 16.5
 
 SUPPORTED_COMPANIES: set[str] = {"Yoco", "Lulalend", "Verto", "MaxSoko"}
 
@@ -90,7 +90,7 @@ def parse_yoco(file_bytes: bytes) -> list[dict]:
     """
     Sheet : KPIQuona Export Doc
     Row 1 : metric labels in col A, date strings from col B onward
-    Currency: ZAR / 18.3 → USD
+    Currency: ZAR / 16.5 → USD
     """
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
 
@@ -235,7 +235,7 @@ def parse_lulalend(file_bytes: bytes) -> list[dict]:
     """
     Sheet: KPI's  — quarterly (row 5 = quarter labels, col C = metric labels)
     Sheet: P&L -* — monthly  (row 5 = month headers, col A = metric labels)
-    Currency: ZAR / 18.3 → USD
+    Currency: ZAR / 16.5 → USD
     """
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
 
