@@ -86,11 +86,26 @@ def find_row(
 
 # ── Yoco ──────────────────────────────────────────────────────────────────────
 
+def _first_row(*labels, ws, label_col: int = 1, exact: bool = False):
+    """Return the first matching row for any of the given labels, or None."""
+    for lbl in labels:
+        r = find_row(ws, lbl, label_col=label_col, exact=exact)
+        if r is not None:
+            return r
+    return None
+
+
 def parse_yoco(file_bytes: bytes) -> list[dict]:
     """
     Sheet : KPIQuona Export Doc
     Row 1 : metric labels in col A, date strings from col B onward
     Currency: ZAR / 16.5 → USD
+
+    Derived metrics computed per period:
+      gross_margin_pct   = gross_profit / revenue          (or revenue - COGS if GP row absent)
+      ebitda_margin_pct  = ebitda / revenue
+      net_margin_pct     = net_income / revenue
+      revenue_growth_pct = (rev - prior_rev) / prior_rev  (None for first period in batch)
     """
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
 
@@ -100,18 +115,40 @@ def parse_yoco(file_bytes: bytes) -> list[dict]:
         )
     ws = wb["KPIQuona Export Doc"]
 
+    # ── Raw metric row discovery ──────────────────────────────────────────────
     row_rev = find_row(ws, "Transaction Revenue",      label_col=1)
     row_gp  = find_row(ws, "Transaction Gross Margin", label_col=1)
     row_gmv = find_row(ws, "Transaction Volume",       label_col=1)
     row_eop = find_row(ws, "End of Period Base",       label_col=1)
     row_mam = find_row(ws, "Monthly Active Merchants", label_col=1)
 
+    # EBITDA: exact labels first to avoid matching "EBITDA Margin" rows
+    row_ebitda = _first_row(
+        "EBITDA", "Adjusted EBITDA", "Total EBITDA", "Group EBITDA",
+        ws=ws, label_col=1, exact=True,
+    )
+
+    # Net income: try common label variants
+    row_net = _first_row(
+        "Net Income", "Net Profit", "PAT", "Profit After Tax",
+        "Net Profit/(Loss)", "Net Loss", "Profit / (Loss) After Tax",
+        ws=ws, label_col=1, exact=True,
+    )
+
+    # COGS fallback — only used when Transaction Gross Margin row is absent
+    row_cogs = None
+    if row_gp is None:
+        row_cogs = _first_row(
+            "Transaction Costs", "Cost of Revenue", "Cost of Goods Sold", "COGS",
+            ws=ws, label_col=1, exact=True,
+        )
+
     if row_rev is None:
         raise ValueError(
             "Cannot find 'Transaction Revenue' row in KPIQuona Export Doc sheet"
         )
 
-    # Collect date columns from row 1 (col B onward)
+    # ── Date column discovery (row 1, col B onward) ───────────────────────────
     date_cols: dict[int, str] = {}
     for c in range(2, ws.max_column + 1):
         raw = ws.cell(1, c).value
@@ -120,28 +157,55 @@ def parse_yoco(file_bytes: bytes) -> list[dict]:
             if d and d >= "2023-01-01":
                 date_cols[c] = d
 
+    # ── Per-period extraction ─────────────────────────────────────────────────
     results: list[dict] = []
     for col, period in sorted(date_cols.items(), key=lambda x: x[1]):
         rev_zar = safe_float(ws.cell(row_rev, col).value)
         if not rev_zar:
             continue
 
-        gp_zar  = safe_float(ws.cell(row_gp,  col).value) if row_gp  else None
-        gmv_zar = safe_float(ws.cell(row_gmv, col).value) if row_gmv else None
-        eop     = safe_float(ws.cell(row_eop, col).value) if row_eop else None
-        mam     = safe_float(ws.cell(row_mam, col).value) if row_mam else None
+        gp_zar     = safe_float(ws.cell(row_gp,    col).value) if row_gp    else None
+        gmv_zar    = safe_float(ws.cell(row_gmv,   col).value) if row_gmv   else None
+        eop        = safe_float(ws.cell(row_eop,   col).value) if row_eop   else None
+        mam        = safe_float(ws.cell(row_mam,   col).value) if row_mam   else None
+        ebitda_zar = safe_float(ws.cell(row_ebitda,col).value) if row_ebitda else None
+        net_zar    = safe_float(ws.cell(row_net,   col).value) if row_net   else None
 
-        rev_usd = round(rev_zar / FX_ZAR, 2)
-        gm_pct  = round(gp_zar / rev_zar * 100, 4) if gp_zar else None
+        # Gross profit fallback: Revenue - COGS if GP row not found
+        if gp_zar is None and row_cogs is not None:
+            cogs_zar = safe_float(ws.cell(row_cogs, col).value)
+            if cogs_zar is not None:
+                gp_zar = rev_zar - cogs_zar
+
+        # Derived margins (null if inputs unavailable)
+        rev_usd      = round(rev_zar / FX_ZAR, 2)
+        gp_usd       = round(gp_zar    / FX_ZAR, 2) if gp_zar    is not None else None
+        gm_pct       = round(gp_zar    / rev_zar * 100, 4) if gp_zar    is not None else None
+        ebitda_usd   = round(ebitda_zar / FX_ZAR, 2) if ebitda_zar is not None else None
+        ebitda_m_pct = round(ebitda_zar / rev_zar * 100, 4) if ebitda_zar is not None else None
+        net_usd      = round(net_zar    / FX_ZAR, 2) if net_zar    is not None else None
+        net_m_pct    = round(net_zar    / rev_zar * 100, 4) if net_zar    is not None else None
+
+        # Revenue growth vs immediately prior period in this batch
+        if results and results[-1]["revenue_usd"]:
+            prior = results[-1]["revenue_usd"]
+            rev_growth = round((rev_usd - prior) / prior * 100, 4) if prior > 0 else None
+        else:
+            rev_growth = None  # first period in batch; backfilled by _recompute_growth
 
         results.append({
             "period_end_date":      period,
             "reporting_currency":   "ZAR",
             "fx_rate_to_usd":       FX_ZAR,
             "revenue_usd":          rev_usd,
-            "gross_profit_usd":     round(gp_zar  / FX_ZAR, 2) if gp_zar  else None,
+            "gross_profit_usd":     gp_usd,
             "gross_margin_pct":     gm_pct,
-            "gmv_usd":              round(gmv_zar / FX_ZAR, 2) if gmv_zar else None,
+            "ebitda_usd":           ebitda_usd,
+            "ebitda_margin_pct":    ebitda_m_pct,
+            "net_income_usd":       net_usd,
+            "net_margin_pct":       net_m_pct,
+            "revenue_growth_pct":   rev_growth,
+            "gmv_usd":              round(gmv_zar / FX_ZAR, 2) if gmv_zar is not None else None,
             "customer_count":       int(eop) if eop else None,
             "active_clients_count": int(mam) if mam else None,
         })

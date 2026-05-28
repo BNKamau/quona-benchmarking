@@ -185,6 +185,27 @@ def _init_exit_tables() -> None:
 
 _init_exit_tables()
 
+
+def _ensure_kpi_columns() -> None:
+    """Add derived-metric columns introduced after the initial schema, idempotently."""
+    new_cols = [
+        "net_income_usd    REAL",
+        "net_margin_pct    REAL",
+        "revenue_growth_pct REAL",
+    ]
+    conn = _conn()
+    for col_def in new_cols:
+        try:
+            conn.execute(f"ALTER TABLE kpi_snapshots ADD COLUMN {col_def}")
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+    conn.close()
+
+
+_ensure_kpi_columns()
+
+
 # ── Exit comps DB helpers ──────────────────────────────────────────────────────
 COMPS_DB = "data/quona_exit_comps.db"
 _COMP_NAME_MAP = {"VertoFX": "Verto FX"}  # benchmarking.db name → portfolio_comp_mapping name
@@ -461,8 +482,10 @@ def load_kpis(company_id: int) -> pd.DataFrame:
     try:
         df = pd.read_sql_query("""
             SELECT period_end_date,
-                   revenue_usd, gross_margin_pct,
+                   revenue_usd, gross_profit_usd, gross_margin_pct,
                    ebitda_usd, ebitda_margin_pct,
+                   net_income_usd, net_margin_pct,
+                   revenue_growth_pct,
                    arr_usd, mrr_usd,
                    customer_count, active_clients_count,
                    net_revenue_retention_pct, cac_usd, ltv_usd,
@@ -477,14 +500,21 @@ def load_kpis(company_id: int) -> pd.DataFrame:
     finally:
         conn.close()
     df["period_end_date"] = pd.to_datetime(df["period_end_date"])
-    mask = (
-        df["ebitda_margin_pct"].isna()
-        & df["ebitda_usd"].notna()
-        & (df["revenue_usd"].fillna(0) > 0)
-    )
-    df.loc[mask, "ebitda_margin_pct"] = (
-        df.loc[mask, "ebitda_usd"] / df.loc[mask, "revenue_usd"] * 100
-    ).round(2)
+
+    rev = df["revenue_usd"].replace(0, float("nan"))
+
+    # Gross margin fallback: derive from gross_profit_usd if margin not stored
+    mask = df["gross_margin_pct"].isna() & df["gross_profit_usd"].notna() & rev.notna()
+    df.loc[mask, "gross_margin_pct"] = (df.loc[mask, "gross_profit_usd"] / rev[mask] * 100).round(4)
+
+    # EBITDA margin fallback
+    mask = df["ebitda_margin_pct"].isna() & df["ebitda_usd"].notna() & rev.notna()
+    df.loc[mask, "ebitda_margin_pct"] = (df.loc[mask, "ebitda_usd"] / rev[mask] * 100).round(4)
+
+    # Net margin fallback
+    mask = df["net_margin_pct"].isna() & df["net_income_usd"].notna() & rev.notna()
+    df.loc[mask, "net_margin_pct"] = (df.loc[mask, "net_income_usd"] / rev[mask] * 100).round(4)
+
     return df
 
 
@@ -1863,6 +1893,33 @@ def _upsert_kpi(company_id: int, data: dict) -> None:
     conn.close()
 
 
+def _recompute_growth(company_id: int) -> None:
+    """Backfill revenue_growth_pct for every period of a company using the DB record order.
+
+    Called after each upload batch so the first period in the batch (which the
+    parser leaves as None) gets its growth filled from the prior DB period.
+    """
+    conn = _conn()
+    rows = conn.execute(
+        """SELECT id, revenue_usd FROM kpi_snapshots
+           WHERE company_id = ? AND revenue_usd IS NOT NULL
+           ORDER BY period_end_date""",
+        (company_id,),
+    ).fetchall()
+    for i, (row_id, rev) in enumerate(rows):
+        if i == 0 or rows[i - 1][1] is None:
+            growth = None
+        else:
+            prior = rows[i - 1][1]
+            growth = round((rev - prior) / prior * 100, 4) if prior > 0 else None
+        conn.execute(
+            "UPDATE kpi_snapshots SET revenue_growth_pct = ? WHERE id = ?",
+            (growth, row_id),
+        )
+    conn.commit()
+    conn.close()
+
+
 # ── Exit tracking DB helpers ──────────────────────────────────────────────────
 
 def _exit_pathways_load(company_id: int) -> list[dict]:
@@ -2306,6 +2363,7 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
         with st.spinner(f"Saving {len(cached_rows)} period(s) to database…"):
             for p in cached_rows:
                 _upsert_kpi(company_id, p)
+            _recompute_growth(company_id)
 
         with st.spinner("Generating AI commentary…"):
             commentary = _generate_commentary(
