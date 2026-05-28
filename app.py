@@ -131,7 +131,11 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ── DB helpers ─────────────────────────────────────────────────────────────────
-DB_PATH = "benchmarking.db"
+# Absolute path — invariant of the process CWD so reads and writes always
+# hit the same file, whether launched from the repo root, a parent dir, or
+# a cloud runner that sets a different working directory.
+_HERE    = os.path.dirname(os.path.abspath(__file__))
+DB_PATH  = os.path.join(_HERE, "benchmarking.db")
 
 def _conn():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -139,8 +143,97 @@ def _conn():
     conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
-def _init_exit_tables() -> None:
+# Companies that should always exist in the registry.
+# Seeded automatically on first startup so uploads work on a fresh install.
+_PORTFOLIO_COMPANIES = [
+    ("Cowrywise", "portfolio", "wealth_management",          "savings_and_investment",        "NG", 2017, "b2c", "NGN"),
+    ("Yoco",      "portfolio", "payments",                   "merchant_acquiring",             "ZA", 2015, "b2b", "ZAR"),
+    ("Verto",     "portfolio", "payments",                   "cross_border_fx",                "NG", 2019, "b2b", "USD"),
+    ("Enza",      "portfolio", "payments",                   "card_issuing_paas",              "KE", 2020, "b2b", "USD"),
+    ("Lulalend",  "portfolio", "lending",                    "sme_lending",                   "ZA", 2014, "b2b", "ZAR"),
+    ("Khazna",    "portfolio", "lending",                    "consumer_lending",               "EG", 2021, "b2c", "USD"),
+    ("TWINCO",    "portfolio", "lending",                    "supply_chain_finance",           "ES", 2019, "b2b", "EUR"),
+    ("MaxSoko",   "portfolio", "marketplace",                "ecommerce_embedded_finance",     "EG", 2015, "b2b", "USD"),
+    ("SAVA",      "portfolio", "payments",                   "card_issuing_baas",              "ZA", 2022, "b2b", "ZAR"),
+    ("AllLife",   "portfolio", "insurtech",                  "life_insurance",                 "ZA", 2004, "b2c", "ZAR"),
+    ("OCTA",      "portfolio", "saas",                       "invoice_ar_automation",          "NG", 2023, "b2b", "USD"),
+    ("Eseye",     "portfolio", "iot_infrastructure",         "managed_connectivity",           "GB", 2007, "b2b", "GBP"),
+    ("POWER",     "portfolio", "lending",                    "earned_wage_access",             "US", 2020, "b2b", "USD"),
+]
+
+
+def _init_db() -> None:
+    """Create all tables and seed the company registry on first run.
+
+    Safe to call on every startup: CREATE TABLE IF NOT EXISTS and INSERT OR
+    IGNORE ensure existing data is never touched.  ALTER TABLE ADD COLUMN
+    is also idempotent (errors are swallowed).
+    """
     conn = _conn()
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS companies (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            name               TEXT    NOT NULL,
+            type               TEXT    NOT NULL DEFAULT 'portfolio',
+            sector             TEXT,
+            sub_sector         TEXT,
+            hq_country         TEXT,
+            founded_year       INTEGER,
+            business_model     TEXT,
+            reporting_currency TEXT,
+            fund               TEXT,
+            notes              TEXT,
+            created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at         TEXT    NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS kpi_snapshots (
+            id                         INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id                 INTEGER NOT NULL REFERENCES companies(id),
+            period_end_date            TEXT    NOT NULL,
+            reporting_currency         TEXT    NOT NULL DEFAULT 'USD',
+            fx_rate_to_usd             REAL,
+            revenue_usd                REAL,
+            gross_profit_usd           REAL,
+            gross_margin_pct           REAL,
+            ebitda_usd                 REAL,
+            ebitda_margin_pct          REAL,
+            arr_usd                    REAL,
+            mrr_usd                    REAL,
+            customer_count             INTEGER,
+            active_clients_count       INTEGER,
+            net_revenue_retention_pct  REAL,
+            gross_churn_rate_pct       REAL,
+            cac_usd                    REAL,
+            ltv_usd                    REAL,
+            loan_book_gross_usd        REAL,
+            npl_rate_pct               REAL,
+            par_30_pct                 REAL,
+            par_90_pct                 REAL,
+            net_yield_pct              REAL,
+            cost_of_risk_pct           REAL,
+            nim_pct                    REAL,
+            leverage_ratio             REAL,
+            aum_usd                    REAL,
+            gmv_usd                    REAL,
+            tpv_usd                    REAL,
+            unique_borrowers_count     INTEGER,
+            top_3_concentration_pct    REAL,
+            insurance_policies_active  INTEGER,
+            devices_connected          INTEGER,
+            net_income_usd             REAL,
+            net_margin_pct             REAL,
+            revenue_growth_pct         REAL,
+            notes                      TEXT,
+            created_at                 TEXT    NOT NULL DEFAULT (datetime('now')),
+            updated_at                 TEXT    NOT NULL DEFAULT (datetime('now')),
+            UNIQUE (company_id, period_end_date)
+        )
+    """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS exit_pathways (
             id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,6 +246,7 @@ def _init_exit_tables() -> None:
             updated_at         TEXT
         )
     """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS buyer_tracking (
             id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,6 +261,7 @@ def _init_exit_tables() -> None:
             updated_at         TEXT
         )
     """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS quarterly_actions (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,34 +275,55 @@ def _init_exit_tables() -> None:
             UNIQUE(company_id, quarter)
         )
     """)
+
     conn.commit()
-    conn.close()
 
-_init_exit_tables()
-
-
-def _ensure_kpi_columns() -> None:
-    """Add derived-metric columns introduced after the initial schema, idempotently."""
-    new_cols = [
-        "net_income_usd    REAL",
-        "net_margin_pct    REAL",
-        "revenue_growth_pct REAL",
-    ]
-    conn = _conn()
-    for col_def in new_cols:
+    # Idempotently add columns that were introduced after the initial schema
+    for col_def in [
+        "net_income_usd         REAL",
+        "net_margin_pct         REAL",
+        "revenue_growth_pct     REAL",
+        "aum_usd                REAL",
+        "gmv_usd                REAL",
+        "active_clients_count   INTEGER",
+        "par_30_pct             REAL",
+        "par_90_pct             REAL",
+        "top_3_concentration_pct REAL",
+        "insurance_policies_active INTEGER",
+        "tpv_usd               REAL",
+        "devices_connected      INTEGER",
+        "unique_borrowers_count INTEGER",
+        "fund                   TEXT",
+        "sub_sector             TEXT",
+    ]:
         try:
-            conn.execute(f"ALTER TABLE kpi_snapshots ADD COLUMN {col_def}")
+            table = "kpi_snapshots" if col_def.split()[0] not in ("fund", "sub_sector") else "companies"
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
             conn.commit()
         except Exception:
             pass  # column already exists
+
+    # Seed company registry only on a completely fresh DB.
+    # We check count == 0 because companies has no UNIQUE constraint on name,
+    # so INSERT OR IGNORE would silently duplicate rows on every startup.
+    n_companies = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
+    if n_companies == 0:
+        for (name, typ, sector, sub_sector, hq, year, biz, currency) in _PORTFOLIO_COMPANIES:
+            conn.execute("""
+                INSERT INTO companies
+                    (name, type, sector, sub_sector, hq_country, founded_year,
+                     business_model, reporting_currency)
+                VALUES (?,?,?,?,?,?,?,?)
+            """, (name, typ, sector, sub_sector, hq, year, biz, currency))
+        conn.commit()
     conn.close()
 
 
-_ensure_kpi_columns()
+_init_db()
 
 
 # ── Exit comps DB helpers ──────────────────────────────────────────────────────
-COMPS_DB = "data/quona_exit_comps.db"
+COMPS_DB = os.path.join(_HERE, "data", "quona_exit_comps.db")
 _COMP_NAME_MAP = {"VertoFX": "Verto FX"}  # benchmarking.db name → portfolio_comp_mapping name
 
 def _comps_conn():
