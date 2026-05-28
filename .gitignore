@@ -1,12 +1,8 @@
-# SQLite databases — never commit; the app self-initialises schema on first run
-# Upload data via the UI after a fresh install/deploy
-benchmarking.db
+# SQLite WAL/SHM transient files — never commit these
 benchmarking.db-wal
 benchmarking.db-shm
-data/quona_exit_comps.db
 data/quona_exit_comps.db-wal
 data/quona_exit_comps.db-shm
-quona_exit_comps.db
 quona_exit_comps.db-wal
 quona_exit_comps.db-shm
 
