@@ -2850,6 +2850,379 @@ def fetch_last_affinity_note_for_buyer(buyer_name: str, affinity_api_key: str) -
         return None
 
 
+# ── VertoFX custom exit tab ──────────────────────────────────────────────────
+
+def _render_vertofx_exit_tab() -> None:
+    # ── Section 1: Exit Pathways (collapsed) ─────────────────────────────────
+    AMBER     = "#FFC107"
+    GREEN_DOT = "#D5FA94"
+    RED_DOT   = "#E57373"
+    EMPTY     = "#D4D5CE"
+
+    def _pathway_card(title, valuation, description, feasibility_dots, tag, highlight=False):
+        border_extra = "border-left:3px solid #D5FA94;" if highlight else ""
+        dots_html = "".join(
+            f"<span style='display:inline-block;width:10px;height:10px;border-radius:50%;"
+            f"background:{d};margin-right:3px'></span>"
+            for d in feasibility_dots
+        )
+        rev_line = (
+            f"<div style='font-size:12px;color:{MUTED};margin-top:2px'>{valuation[1]}</div>"
+            if len(valuation) > 1 else ""
+        )
+        return f"""
+<div style='background:#FFFFFF;border:1px solid #D4D5CE;{border_extra}border-radius:8px;
+     padding:16px;height:100%'>
+  <div style='font-size:14px;font-weight:700;color:#2C2C2A;margin-bottom:4px'>{title}</div>
+  <div style='font-size:10px;color:#93A3A1;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px'>Valuation</div>
+  <div style='font-size:13px;color:#2C2C2A'>{valuation[0]}</div>
+  {rev_line}
+  <div style='font-size:12px;color:#93A3A1;font-style:italic;margin:6px 0 8px'>{description}</div>
+  <div style='margin:4px 0 8px'>{dots_html}</div>
+  <span style='font-size:11px;font-weight:600;color:{MUTED};background:#EFF0EA;
+    border-radius:4px;padding:2px 7px'>{tag}</span>
+</div>"""
+
+    pathways = [
+        (
+            "Remain Independent — Quona Pursues Secondaries",
+            ["$150–400M", "3–5x revenue"],
+            "Continue scaling B2B FX rails and treasury services across Africa and UAE corridors — but investor timeline pressure is growing",
+            [AMBER, AMBER, EMPTY], "Unattractive strategically", False,
+        ),
+        (
+            "Strategic Sale to Global PSP",
+            ["$100–250M", "4–8x revenue"],
+            "Acquisition by a global payments infrastructure player seeking Africa and EM corridor access — most realistic path given consolidation in B2B FX",
+            [GREEN_DOT, GREEN_DOT, GREEN_DOT], "Most likely — 24–36 months", True,
+        ),
+        (
+            "Strategic Sale to African Bank",
+            ["$50–150M", "2–4x revenue"],
+            "Acquisition by a pan-African bank seeking to own FX infrastructure and reduce correspondent banking costs",
+            [AMBER, AMBER, EMPTY], "Possible — dependent on scale", False,
+        ),
+        (
+            "PE Recap / Acquihire",
+            ["$50–100M"],
+            "Private equity recapitalisation or acquihire providing investor liquidity while business continues to scale",
+            [AMBER, EMPTY, EMPTY], "Last resort", False,
+        ),
+    ]
+
+    with st.expander("Exit Pathways — click to expand", expanded=False):
+        row1, row2 = st.columns(2), st.columns(2)
+        for idx, (title, val, desc, dots, tag, highlight) in enumerate(pathways):
+            col = row1[idx] if idx < 2 else row2[idx - 2]
+            with col:
+                st.markdown(_pathway_card(title, val, desc, dots, tag, highlight), unsafe_allow_html=True)
+                st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 2: Implied Valuation Range ───────────────────────────────────
+    vertofx_id_row = pd.read_sql_query(
+        "SELECT id FROM companies WHERE name = 'VertoFX' LIMIT 1", _conn()
+    )
+    ltm_revenue = None
+    if not vertofx_id_row.empty:
+        vertofx_id = int(vertofx_id_row.iloc[0]["id"])
+        ltm_df     = load_ltm_revenue()
+        _vrow      = ltm_df[ltm_df["id"] == vertofx_id]
+        if not _vrow.empty and _vrow.iloc[0]["ltm_revenue"] is not None:
+            ltm_revenue = float(_vrow.iloc[0]["ltm_revenue"])
+
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 6px 0;letter-spacing:.3px'>Implied Valuation Range</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:16px'>"
+        f"Based on comparable exit multiples and B2B FX transaction benchmarks. "
+        f"LTM Revenue: {fmt_usd(ltm_revenue)}</div>",
+        unsafe_allow_html=True,
+    )
+
+    _HDR = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px"
+    )
+    hcols = st.columns([2, 1, 1, 1, 2])
+    for hc, lbl in zip(hcols, ["Pathway", "Multiple", "Low Case", "Base Case", "High Case"]):
+        with hc:
+            st.markdown(f"<div style='{_HDR}'>{lbl}</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='height:2px;background:{BORDER};margin:6px 0 10px'></div>",
+        unsafe_allow_html=True,
+    )
+
+    def _val_row(pathway_name, tag, tag_bg, tag_fg, multiple_lbl,
+                 low, base, high, base_color, note):
+        cols = st.columns([2, 1, 1, 1, 2])
+        with cols[0]:
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:700;color:{BLACK};padding-top:4px'>"
+                f"{pathway_name}</div>"
+                f"<span style='font-size:11px;font-weight:600;background:{tag_bg};color:{tag_fg};"
+                f"border-radius:4px;padding:2px 7px'>{tag}</span>",
+                unsafe_allow_html=True,
+            )
+        with cols[1]:
+            st.markdown(
+                f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{multiple_lbl}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[2]:
+            st.markdown(
+                f"<div style='font-size:14px;color:{BLACK};padding-top:6px'>{fmt_usd(low)}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[3]:
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:700;color:{base_color};padding-top:6px'>"
+                f"{fmt_usd(base)}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[4]:
+            st.markdown(
+                f"<div style='font-size:14px;color:{MUTED};padding-top:6px'>Up to {fmt_usd(high)}</div>",
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            f"<div style='font-size:11px;color:{MUTED};font-style:italic;margin:4px 0 8px'>{note}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"<hr style='border-color:{BORDER};margin:8px 0'>", unsafe_allow_html=True)
+
+    r = ltm_revenue or 0
+    _val_row(
+        "Strategic Sale to Global PSP",
+        "Most likely — 24–36 months", GREEN, BLACK,
+        "4–8x Revenue",
+        r * 4, r * 6, r * 8,
+        "#2E7D32",
+        "Consistent with Airwallex ($6.2B at ~8x ARR), Wise public comp at 5x revenue, "
+        "and Corpay acquisition of GPS Capital Markets (B2B FX, 2024)",
+    )
+    _val_row(
+        "Strategic Sale to African Bank",
+        "Possible", BLUE, "#1565C0",
+        "2–4x Revenue",
+        r * 2, r * 3, r * 4,
+        "#1565C0",
+        "African bank acquisitions of fintech infrastructure typically price on strategic value not revenue — "
+        "Nedbank-iKhokha and Lesaka-Bank Zero as reference points",
+    )
+    _val_row(
+        "Remain Independent — Quona Pursues Secondaries",
+        "Unattractive", "#D4D5CE", BLACK,
+        "3–5x Revenue",
+        r * 3, r * 4, r * 5,
+        BLACK,
+        "Secondary transaction at modest multiple; consistent with Payoneer public comp at ~2x "
+        "and Wise at ~5x revenue",
+    )
+    _val_row(
+        "PE Recap / Acquihire",
+        "Last resort", "#D4D5CE", BLACK,
+        "1–2x Revenue",
+        r * 1, r * 1.5, r * 2,
+        BLACK,
+        "Distressed or opportunistic transaction; acquihire value driven by team and licenses not revenue",
+    )
+
+    st.markdown(
+        f"<div style='background:{BG};border-radius:8px;padding:12px 16px;"
+        f"font-size:11px;color:{MUTED};margin-top:8px'>"
+        f"Valuation ranges are indicative. Comps include Airwallex Series F ($6.2B valuation, 2025), "
+        f"Wise public trading (~5x revenue), Payoneer public trading (~2x revenue), "
+        f"Corpay acquisition of GPS Capital Markets (B2B FX, 2024), "
+        f"and Paystack–Stripe ($200M+, 2020)."
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 3: Acquirer Universe ─────────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 12px 0;letter-spacing:.3px'>Acquirer Universe — Prioritized</div>",
+        unsafe_allow_html=True,
+    )
+
+    FIT_COLORS = {
+        "Very High":  ("#D5FA94", "#2C2C2A"),
+        "High":       ("#C5E5FF", "#1565C0"),
+        "Medium":     ("#D4D5CE", "#2C2C2A"),
+        "Low-Medium": ("#FFCDD2", "#B71C1C"),
+        "Low":        ("#FFCDD2", "#B71C1C"),
+    }
+
+    def _fit_badge(fit):
+        bg, fg = FIT_COLORS.get(fit, ("#D4D5CE", "#2C2C2A"))
+        return (
+            f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:600;"
+            f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>"
+        )
+
+    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0, affinity_override=None):
+        row_bg = "#EFF0EA" if row_idx % 2 == 0 else "#FFFFFF"
+        with st.container():
+            st.markdown(
+                f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
+                unsafe_allow_html=True,
+            )
+            cols = st.columns([2, 2, 3, 1, 2])
+            with cols[0]:
+                st.markdown(
+                    f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"{_fit_badge(fit)}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[1]:
+                st.markdown(
+                    f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{activity}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[2]:
+                st.markdown(
+                    f"<div style='font-size:13px;color:#2C2C2A;padding-top:6px'>{rationale}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[3]:
+                st.checkbox("", key=key)
+            with cols[4]:
+                if affinity_override is not None:
+                    st.markdown(
+                        f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{affinity_override}</div>",
+                        unsafe_allow_html=True,
+                    )
+                elif affinity_cache is None:
+                    st.markdown(
+                        f"<div style='font-size:11px;color:{MUTED};padding-top:8px'>Sync Affinity above</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    note = affinity_cache.get(name)
+                    if note is None:
+                        st.markdown(
+                            f"<div style='font-size:11px;color:{MUTED};font-style:italic;padding-top:8px'>Not in Affinity</div>",
+                            unsafe_allow_html=True,
+                        )
+                    elif note.get("stale"):
+                        st.markdown(
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            unsafe_allow_html=True,
+                        )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    local_buyers = [
+        ("Standard Bank / Stanbic", "High",
+         "Africa's largest bank by assets; actively building trade finance and cross-border payment capabilities across 20+ African markets",
+         "Verto's EM FX rails reduce Standard Bank's correspondent banking costs and deepen its SME trade finance offering"),
+        ("Access Bank", "High",
+         "Expanded to 20+ countries; positioning as Africa's gateway bank for trade and cross-border flows",
+         "Verto's multi-currency infrastructure and UAE corridor directly supports Access Bank's pan-African and diaspora payment strategy"),
+        ("Ecobank", "Medium",
+         "Operates in 35 African countries; focused on deepening intra-African trade payments",
+         "Verto's B2B FX and treasury tools would strengthen Ecobank's corporate banking product across its African footprint"),
+        ("FirstBank Nigeria", "Medium",
+         "Scaling digital corporate banking and trade finance products",
+         "Verto's FX infrastructure could power FirstBank's B2B cross-border offering for Nigerian corporates trading across Africa and the UAE"),
+    ]
+
+    global_buyers = [
+        ("Corpay", "Very High",
+         "Acquired GPS Capital Markets (B2B FX treasury, 2024) — directly comparable to Verto's model; scaling Corporate Payments to $2B by 2026",
+         "Verto's Africa and EM corridor coverage fills a gap in Corpay's global B2B FX footprint"),
+        ("Nium", "Very High",
+         "$1.4B valuation; actively expanding real-time payout rails across Africa and the Middle East",
+         "Verto's licensed EM infrastructure and $25B+ in annual volume would materially accelerate Nium's Africa expansion"),
+        ("Thunes", "High",
+         "Raised $150M Series D (2024); expanding cross-border payment corridors in Africa and Asia",
+         "Verto's B2B FX rails and treasury tools are highly complementary to Thunes' cross-border payout network"),
+        ("Airwallex", "High",
+         "Raised $300M Series F at $6.2B valuation (2025); expanding into UAE and EM markets",
+         "Verto's Africa corridor expertise and DFSA license complement Airwallex's UAE expansion; acquisition would fast-track African B2B payments"),
+        ("Mastercard", "Medium",
+         "Invested $200M in MTN MoMo; scaling B2B cross-border and trade finance products in Africa",
+         "Verto's multi-currency infrastructure and enterprise client base align with Mastercard's B2B payments and trade finance agenda"),
+        ("Wise", "Medium",
+         "Scaling Wise Business (B2B) globally; processing $130B+ annually",
+         "Verto's EM corridor specialisation and African licensing complement Wise's B2B expansion into frontier markets"),
+    ]
+
+    secondaries_buyers = [
+        ("Partech", "High",
+         "Closed €280M second Africa fund (2024); top Series A/B investor in Africa in 2025",
+         "Verto is a de-risked B2B fintech with enterprise clients and growing UAE corridor — fits Partech's fintech mandate"),
+        ("Norrsken22", "Medium",
+         "$205M fund; backed Stitch and TymeBank in SA payments and banking",
+         "Verto deepens their Africa fintech exposure in B2B payments, a segment they don't yet have direct coverage in"),
+        ("Blue Earth Capital", "Low",
+         "GP-led secondary in Moniepoint (Oct 2025); impact-focused Africa secondaries strategy",
+         "Verto's financial inclusion angle is weaker than typical Blue Earth targets — lower fit unless impact narrative is strengthened"),
+    ]
+
+    affinity_cache = st.session_state.get("vertofx_affinity_data")
+    _, _sync_btn_col = st.columns([6, 1])
+    with _sync_btn_col:
+        if st.button("Sync Affinity", key="vertofx_affinity_sync"):
+            _api_key  = st.secrets.get("AFFINITY_API_KEY", "")
+            all_names = list(dict.fromkeys(
+                [b[0] for b in local_buyers]
+                + [g[0] for g in global_buyers]
+                + [s[0] for s in secondaries_buyers]
+            ))
+            with st.spinner("Fetching Affinity data for all buyers…"):
+                st.session_state["vertofx_affinity_data"] = {
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    for bname in all_names
+                }
+            st.rerun()
+
+    _HDR_STYLE = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px;padding-bottom:4px"
+    )
+
+    def _header_row():
+        hcols  = st.columns([2, 2, 3, 1, 2])
+        labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage Q3?", "Last Affinity Contact"]
+        for hc, lbl in zip(hcols, labels):
+            with hc:
+                st.markdown(f"<div style='{_HDR_STYLE}'>{lbl}</div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:2px;background:#EFF0EA;margin-bottom:8px'></div>", unsafe_allow_html=True)
+
+    tab_local, tab_global, tab_sec = st.tabs(["Local Buyers", "Global Buyers", "Secondaries Buyers"])
+    with tab_local:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(local_buyers):
+            key = "engage_vertofx_" + name.replace(" ", "").replace("/", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+    with tab_global:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(global_buyers):
+            key = "engage_vertofx_" + name.replace(" ", "").replace("/", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+    with tab_sec:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(secondaries_buyers):
+            key = "engage_vertofx_sec_" + name.replace(" ", "").replace("/", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+
 # ── Lulalend custom exit tab ─────────────────────────────────────────────────
 
 def _render_lulalend_exit_tab() -> None:
@@ -3523,6 +3896,11 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
     # ── Lulalend custom exit tab ───────────────────────────────────────────────
     if company_name == "Lulalend":
         _render_lulalend_exit_tab()
+        return
+
+    # ── VertoFX custom exit tab ────────────────────────────────────────────────
+    if company_name in ("VertoFX", "Verto FX"):
+        _render_vertofx_exit_tab()
         return
 
     LIKELIHOOD_OPTS = ["Exploratory", "Active", "Advanced", "On Hold"]

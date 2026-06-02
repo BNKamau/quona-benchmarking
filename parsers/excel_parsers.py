@@ -14,7 +14,7 @@ import openpyxl
 
 FX_ZAR: float = 16.5
 
-SUPPORTED_COMPANIES: set[str] = {"Yoco", "Lulalend", "Verto", "MaxSoko"}
+SUPPORTED_COMPANIES: set[str] = {"Yoco", "Lulalend", "Verto", "VertoFX", "MaxSoko"}
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -484,5 +484,6 @@ PARSERS: dict[str, callable] = {
     "Yoco":     parse_yoco,
     "Lulalend": parse_lulalend,
     "Verto":    parse_verto,
+    "VertoFX":  parse_verto,
     "MaxSoko":  parse_maxsoko,
 }
