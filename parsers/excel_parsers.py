@@ -13,8 +13,9 @@ from datetime import date, datetime
 import openpyxl
 
 FX_ZAR: float = 16.5
+FX_NGN: float = 1600.0   # NGN/USD — update periodically
 
-SUPPORTED_COMPANIES: set[str] = {"Yoco", "Lulalend", "Verto", "VertoFX", "MaxSoko"}
+SUPPORTED_COMPANIES: set[str] = {"Yoco", "Lulalend", "Verto", "VertoFX", "MaxSoko", "Cowrywise"}
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -478,12 +479,216 @@ def parse_maxsoko(file_bytes: bytes) -> list[dict]:
     return results
 
 
+# ── Cowrywise ─────────────────────────────────────────────────────────────────
+
+def _cwry_best_sheet(wb):
+    """Return the worksheet most likely to contain KPI / P&L data."""
+    keywords = ("kpi", "financial", "p&l", "income", "dashboard", "summary", "monthly", "data")
+    for kw in keywords:
+        for name in wb.sheetnames:
+            if kw in name.lower():
+                return wb[name]
+    return wb.active
+
+
+def _cwry_label_col(ws) -> int:
+    """Return the column (1-indexed) that contains the most metric-label text."""
+    best_col, best_n = 1, 0
+    for col in (1, 2, 3):
+        n = 0
+        for r in range(1, 60):
+            v = ws.cell(r, col).value
+            if isinstance(v, str) and len(v.strip()) > 3 and not re.match(r"^[\d.,\s%\-]+$", v.strip()):
+                n += 1
+        if n > best_n:
+            best_n, best_col = n, col
+    return best_col
+
+
+def _cwry_currency(ws, label_col: int) -> tuple[float, str]:
+    """Detect reporting currency; defaults to NGN for Cowrywise."""
+    for r in range(1, 20):
+        v = str(ws.cell(r, label_col).value or "").lower()
+        if "usd" in v or "dollar" in v:
+            return 1.0, "USD"
+    return FX_NGN, "NGN"
+
+
+def _cwry_date_cols(ws, label_col: int) -> dict[int, str]:
+    """
+    Scan rows 1–6 for date-like column headers; return {col: 'YYYY-MM-DD'}.
+    Handles datetime objects, 'Jan 2024' / 'January 2024', and 'Dec-24' strings.
+    Uses the first header row that yields at least 2 date columns.
+    """
+    for hrow in range(1, 7):
+        found: dict[int, str] = {}
+        for c in range(1, ws.max_column + 1):
+            if c == label_col:
+                continue
+            raw = ws.cell(hrow, c).value
+            if raw is None:
+                continue
+            if hasattr(raw, "year") and hasattr(raw, "month"):
+                found[c] = to_month_end(raw.year, raw.month)
+            elif isinstance(raw, str):
+                d = _normalize_month_str(raw.strip()) or _parse_pl_header(raw.strip())
+                if d:
+                    found[c] = d
+        if len(found) >= 2:
+            return found
+    return {}
+
+
+def parse_cowrywise(file_bytes: bytes) -> list[dict]:
+    """
+    Flexible label-based parser for Cowrywise Excel exports.
+
+    Searches any sheet for common label variants of each KPI rather than
+    relying on a fixed layout, since no canonical file format exists yet.
+
+    Currency detection: searches sheet headers for NGN/USD indicator;
+    defaults to NGN (FX_NGN / USD) when ambiguous.
+
+    Metrics extracted:
+      revenue_usd, gross_margin_pct, ebitda_usd, ebitda_margin_pct,
+      net_income_usd, net_margin_pct, aum_usd, active_clients_count,
+      revenue_growth_pct
+    """
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    ws = _cwry_best_sheet(wb)
+    lc = _cwry_label_col(ws)
+    fx, currency = _cwry_currency(ws, lc)
+
+    def _find(*labels, exact=False):
+        return _first_row(*labels, ws=ws, label_col=lc, exact=exact)
+
+    # Revenue — many possible label variants
+    row_rev = _find(
+        "total revenue", "revenue", "net revenue", "total net revenue",
+        "revenues", "total revenues", "income", "total income",
+    )
+
+    # Gross profit (used as fallback when no explicit GM% row exists)
+    row_gp = _find("gross profit", "gross profit amount", "gross income")
+
+    # Gross margin percentage (preferred over GP/Rev computation)
+    row_gm = _find(
+        "gross margin %", "gross margin pct", "gross margin percentage",
+        "gross profit margin", "gross profit margin %", "gross profit %",
+        "gross margin",
+    )
+
+    # EBITDA — exact match first to avoid matching "EBITDA Margin"
+    row_ebt = (
+        _find("ebitda", exact=True)
+        or _find("adjusted ebitda", "total ebitda", "ebitda (loss)", "ebitda profit")
+        or _find("ebitda")
+    )
+
+    # Net income — exact match first to avoid matching "Net Income Margin"
+    row_net = (
+        _find(
+            "net income", "net profit", "profit after tax", "pat",
+            "net profit/(loss)", "net income/(loss)", "net loss",
+            "profit/(loss) after tax",
+            exact=True,
+        )
+        or _find("net income", "net profit", "profit after tax")
+    )
+
+    # AUM
+    row_aum = _find(
+        "aum", "total aum", "assets under management",
+        "total assets under management", "aum (ngn)", "aum (usd)",
+        "funds under management", "fum",
+    )
+
+    # Active clients / users
+    row_ac = _find(
+        "active users", "active clients", "monthly active users", "mau",
+        "active investors", "total active users", "registered users",
+        "customers", "total customers", "number of users", "total users",
+    )
+
+    if row_rev is None:
+        raise ValueError(
+            f"Cannot find a revenue row in sheet '{ws.title}' (label col {lc}). "
+            "Expected labels such as 'Revenue', 'Total Revenue', or 'Net Revenue'."
+        )
+
+    date_cols = _cwry_date_cols(ws, lc)
+    if not date_cols:
+        raise ValueError(
+            f"No date columns found in sheet '{ws.title}'. "
+            "Expected month/year headers in rows 1–6."
+        )
+
+    results: list[dict] = []
+    for col, period in sorted(date_cols.items(), key=lambda x: x[1]):
+
+        def _g(row, _col=col):
+            return safe_float(ws.cell(row, _col).value) if row else None
+
+        rev_raw = _g(row_rev)
+        if not rev_raw:
+            continue
+
+        gp_raw  = _g(row_gp)
+        gm_raw  = _g(row_gm)
+        ebt_raw = _g(row_ebt)
+        net_raw = _g(row_net)
+        aum_raw = _g(row_aum)
+        ac_raw  = _g(row_ac)
+
+        rev_usd = round(rev_raw / fx, 2)
+
+        # Gross margin: prefer explicit % row; accept decimal (0.xx) or percentage (xx)
+        if gm_raw is not None:
+            gm_pct = round(gm_raw * 100, 4) if abs(gm_raw) <= 1.5 else round(float(gm_raw), 4)
+        elif gp_raw is not None:
+            gm_pct = round(gp_raw / rev_raw * 100, 4)
+        else:
+            gm_pct = None
+
+        ebt_usd = round(ebt_raw / fx, 2) if ebt_raw is not None else None
+        em_pct  = round(ebt_raw / rev_raw * 100, 4) if ebt_raw is not None else None
+
+        net_usd = round(net_raw / fx, 2) if net_raw is not None else None
+        nm_pct  = round(net_raw / rev_raw * 100, 4) if net_raw is not None else None
+
+        aum_usd = round(aum_raw / fx, 2) if aum_raw is not None else None
+
+        if results and results[-1].get("revenue_usd"):
+            prior = results[-1]["revenue_usd"]
+            rev_growth = round((rev_usd - prior) / prior * 100, 4) if prior > 0 else None
+        else:
+            rev_growth = None
+
+        results.append({
+            "period_end_date":      period,
+            "reporting_currency":   currency,
+            "fx_rate_to_usd":       fx,
+            "revenue_usd":          rev_usd,
+            "gross_margin_pct":     gm_pct,
+            "ebitda_usd":           ebt_usd,
+            "ebitda_margin_pct":    em_pct,
+            "net_income_usd":       net_usd,
+            "net_margin_pct":       nm_pct,
+            "aum_usd":              aum_usd,
+            "active_clients_count": int(ac_raw) if ac_raw is not None else None,
+            "revenue_growth_pct":   rev_growth,
+        })
+
+    return results
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 PARSERS: dict[str, callable] = {
-    "Yoco":     parse_yoco,
-    "Lulalend": parse_lulalend,
-    "Verto":    parse_verto,
-    "VertoFX":  parse_verto,
-    "MaxSoko":  parse_maxsoko,
+    "Yoco":      parse_yoco,
+    "Lulalend":  parse_lulalend,
+    "Verto":     parse_verto,
+    "VertoFX":   parse_verto,
+    "MaxSoko":   parse_maxsoko,
+    "Cowrywise": parse_cowrywise,
 }
