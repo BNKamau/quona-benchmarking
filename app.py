@@ -383,7 +383,7 @@ def load_stage_snapshots(comp_ids: tuple) -> pd.DataFrame:
     """, _comps_conn(), params=list(comp_ids))
 
 @st.cache_data(ttl=300)
-def load_companies() -> pd.DataFrame:
+def load_companies(db_version: str = "") -> pd.DataFrame:
     return pd.read_sql_query("""
         SELECT c.id, c.name, c.sector, c.hq_country, c.founded_year, c.fund,
                k.revenue_usd,
@@ -414,7 +414,7 @@ def load_companies() -> pd.DataFrame:
     """, _conn())
 
 @st.cache_data(ttl=300)
-def load_revenue_growth() -> pd.DataFrame:
+def load_revenue_growth(db_version: str = "") -> pd.DataFrame:
     return pd.read_sql_query("""
         WITH ranked AS (
             SELECT company_id, revenue_usd, period_end_date,
@@ -437,7 +437,7 @@ def load_revenue_growth() -> pd.DataFrame:
     """, _conn())
 
 @st.cache_data(ttl=300)
-def load_ltm_revenue() -> pd.DataFrame:
+def load_ltm_revenue(db_version: str = "") -> pd.DataFrame:
     """
     LTM (last 12 months) or ARR-estimated revenue per company.
     - Monthly reporters: sum of last 12 monthly periods
@@ -570,7 +570,7 @@ def load_ltm_revenue() -> pd.DataFrame:
     return pd.DataFrame(results)
 
 @st.cache_data(ttl=300)
-def load_ltm_volume() -> pd.DataFrame:
+def load_ltm_volume(db_version: str = "") -> pd.DataFrame:
     """Compute LTM TPV and GMV per company using Python instead of SQL window functions."""
     query = """
         SELECT company_id, tpv_usd, gmv_usd, period_end_date
@@ -592,7 +592,7 @@ def load_ltm_volume() -> pd.DataFrame:
     return pd.DataFrame(results) if results else pd.DataFrame(columns=['id', 'ltm_tpv_usd', 'ltm_gmv_usd'])
 
 @st.cache_data(ttl=300)
-def load_all_revenue() -> pd.DataFrame:
+def load_all_revenue(db_version: str = "") -> pd.DataFrame:
     return pd.read_sql_query("""
         SELECT company_id AS id, period_end_date, revenue_usd
         FROM kpi_snapshots
@@ -601,14 +601,15 @@ def load_all_revenue() -> pd.DataFrame:
     """, _conn())
 
 @st.cache_data(ttl=300)
-def load_company_info(company_id: int) -> pd.Series:
+def load_company_info(company_id: int, db_version: str = "") -> pd.Series:
     df = pd.read_sql_query(
         "SELECT * FROM companies WHERE id = ?", _conn(), params=(company_id,)
     )
     return df.iloc[0]
 
 @st.cache_data(ttl=300)
-def load_kpis(company_id: int) -> pd.DataFrame:
+def load_kpis(company_id: int, db_version: str = "") -> pd.DataFrame:
+    print(f"[load_kpis] DB={DB_PATH} company_id={company_id} db_version={db_version!r}")
     conn = _conn()
     try:
         df = pd.read_sql_query("""
@@ -688,6 +689,29 @@ def _kpi_last_updated(company_id: int) -> str:
         return dt.strftime("%d %b %Y %H:%M") + " UTC"
     except Exception:
         return ts
+
+def _kpi_db_version(company_id: int) -> str:
+    """Raw MAX(updated_at) for one company — used as a @st.cache_data key."""
+    conn = _conn()
+    try:
+        row = conn.execute(
+            "SELECT MAX(updated_at) FROM kpi_snapshots WHERE company_id=?",
+            (company_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return str(row[0]) if (row and row[0]) else "none"
+
+
+def _db_global_version() -> str:
+    """Raw MAX(updated_at) across ALL kpi_snapshots — used as a @st.cache_data key."""
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT MAX(updated_at) FROM kpi_snapshots").fetchone()
+    finally:
+        conn.close()
+    return str(row[0]) if (row and row[0]) else "none"
+
 
 # ── Formatters ─────────────────────────────────────────────────────────────────
 def _is_null(v) -> bool:
@@ -2021,9 +2045,10 @@ def _existing_periods(company_id: int) -> set[str]:
 
 
 def _upsert_kpi(company_id: int, data: dict) -> None:
-    conn = _conn()
+    conn   = _conn()
     now    = datetime.utcnow().isoformat()
     period = data["period_end_date"]
+    print(f"[_upsert_kpi] DB={DB_PATH} company_id={company_id} period={period}")
 
     existing = conn.execute(
         "SELECT id FROM kpi_snapshots WHERE company_id=? AND period_end_date=?",
@@ -2427,11 +2452,22 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
                 unsafe_allow_html=True,
             )
 
+        _write_ts   = st.session_state.get(f"upload_write_ts_{company_id}", "unknown")
+        _db_path    = st.session_state.get(f"upload_db_path_{company_id}", DB_PATH)
+        _row_count  = st.session_state.get(f"upload_row_count_{company_id}", "?")
         st.markdown(
             f"<div style='background:#E8F5E9;border:1px solid #2E7D32;border-radius:8px;"
-            f"padding:12px 18px;font-size:13px;color:#2E7D32;font-weight:600;margin-bottom:14px'>"
+            f"padding:12px 18px;font-size:13px;color:#2E7D32;font-weight:600;margin-bottom:6px'>"
             f"✓ {len(snap)} period(s) saved. Charts and benchmarking now reflect the "
             f"updated data.</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<div style='font-size:11px;color:{MUTED};margin-bottom:14px;line-height:1.7'>"
+            f"Data last updated: <b>{_write_ts}</b><br>"
+            f"Total rows in DB: <b>{_row_count}</b><br>"
+            f"DB path: <code style='font-size:10px'>{_db_path}</code>"
+            f"</div>",
             unsafe_allow_html=True,
         )
 
@@ -2524,24 +2560,40 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
 
     if confirm:
         with st.spinner(f"Saving {len(cached_rows)} period(s) to database…"):
+            print(f"[upload confirm] Writing {len(cached_rows)} rows | DB={DB_PATH} | company_id={company_id}")
             for p in cached_rows:
                 _upsert_kpi(company_id, p)
             _recompute_growth(company_id)
+
+        # ── Post-write verification ────────────────────────────────────────────
+        _vconn = _conn()
+        _vcount = _vconn.execute(
+            "SELECT COUNT(*) FROM kpi_snapshots WHERE company_id=?", (company_id,)
+        ).fetchone()[0]
+        _vrows = _vconn.execute(
+            "SELECT period_end_date, revenue_usd, updated_at FROM kpi_snapshots "
+            "WHERE company_id=? ORDER BY period_end_date DESC LIMIT 3",
+            (company_id,),
+        ).fetchall()
+        _vconn.close()
+        _write_ts = _vrows[0][2] if _vrows else "unknown"
+        print(f"[upload verify] DB={DB_PATH} company_id={company_id} "
+              f"total_rows={_vcount} latest_3={_vrows}")
 
         with st.spinner("Generating AI commentary…"):
             commentary = _generate_commentary(
                 company_name, str(info.get("sector", "")), cached_rows
             )
 
-        st.session_state[ss_snap]       = list(cached_rows)  # snapshot for success display
+        st.session_state[ss_snap]       = list(cached_rows)
         st.session_state[ss_commentary] = commentary
         st.session_state[ss_saved]      = True
-        # Invalidate the file key cache so re-uploading the same file will
-        # trigger a fresh parse+dedup (not reuse stale ss_parsed).
+        st.session_state[f"upload_write_ts_{company_id}"]    = _write_ts
+        st.session_state[f"upload_db_path_{company_id}"]     = DB_PATH
+        st.session_state[f"upload_row_count_{company_id}"]   = _vcount
         st.session_state.pop(ss_fkey, None)
-        # Clear only the KPI read caches so fresh DB values are loaded on rerun.
-        # Using per-function clear instead of st.cache_data.clear() to avoid
-        # racing with other in-flight cache populations.
+        # Belt-and-suspenders: clear in-process caches.
+        # Cross-worker staleness is handled by db_version keys in each cached function.
         load_kpis.clear()
         load_ltm_revenue.clear()
         load_ltm_volume.clear()
@@ -2937,7 +2989,7 @@ def _render_cowrywise_exit_tab() -> None:
     ltm_revenue = None
     if not cowrywise_id_row.empty:
         cowrywise_id = int(cowrywise_id_row.iloc[0]["id"])
-        ltm_df       = load_ltm_revenue()
+        ltm_df       = load_ltm_revenue(db_version=_db_global_version())
         _crow        = ltm_df[ltm_df["id"] == cowrywise_id]
         if not _crow.empty and _crow.iloc[0]["ltm_revenue"] is not None:
             ltm_revenue = float(_crow.iloc[0]["ltm_revenue"])
@@ -3310,7 +3362,7 @@ def _render_vertofx_exit_tab() -> None:
     ltm_revenue = None
     if not vertofx_id_row.empty:
         vertofx_id = int(vertofx_id_row.iloc[0]["id"])
-        ltm_df     = load_ltm_revenue()
+        ltm_df     = load_ltm_revenue(db_version=_db_global_version())
         _vrow      = ltm_df[ltm_df["id"] == vertofx_id]
         if not _vrow.empty and _vrow.iloc[0]["ltm_revenue"] is not None:
             ltm_revenue = float(_vrow.iloc[0]["ltm_revenue"])
@@ -3683,7 +3735,7 @@ def _render_lulalend_exit_tab() -> None:
     ltm_revenue = None
     if not lulalend_id_row.empty:
         lulalend_id = int(lulalend_id_row.iloc[0]["id"])
-        ltm_df      = load_ltm_revenue()
+        ltm_df      = load_ltm_revenue(db_version=_db_global_version())
         _lrow       = ltm_df[ltm_df["id"] == lulalend_id]
         if not _lrow.empty and _lrow.iloc[0]["ltm_revenue"] is not None:
             ltm_revenue = float(_lrow.iloc[0]["ltm_revenue"])
@@ -4588,11 +4640,12 @@ st.markdown(f"""
 # ══════════════════════════════════════════════════════════════════════════════
 if st.session_state.page == "home":
 
-    companies = load_companies()
-    growth    = load_revenue_growth()
-    ltm       = load_ltm_revenue()
-    all_rev   = load_all_revenue()
-    vol       = load_ltm_volume()
+    _gver     = _db_global_version()
+    companies = load_companies(db_version=_gver)
+    growth    = load_revenue_growth(db_version=_gver)
+    ltm       = load_ltm_revenue(db_version=_gver)
+    all_rev   = load_all_revenue(db_version=_gver)
+    vol       = load_ltm_volume(db_version=_gver)
 
     companies = companies.merge(growth, on="id", how="left")
     companies = companies.merge(ltm,    on="id", how="left")
@@ -4914,11 +4967,14 @@ elif st.session_state.page == "detail":
         st.rerun()
 
     company_id = st.session_state.company_id
-    info = load_company_info(company_id)
-    kpis = load_kpis(company_id)
+    _cver   = _kpi_db_version(company_id)
+    _gver   = _db_global_version()
+    print(f"[company_detail] DB={DB_PATH} company_id={company_id} cver={_cver!r}")
+    info = load_company_info(company_id, db_version=_cver)
+    kpis = load_kpis(company_id, db_version=_cver)
 
     # LTM for this company
-    ltm_df  = load_ltm_revenue()
+    ltm_df  = load_ltm_revenue(db_version=_gver)
     ltm_row = ltm_df[ltm_df["id"] == company_id]
     ltm_val = float(ltm_row.iloc[0]["ltm_revenue"]) if not ltm_row.empty and not _is_null(ltm_row.iloc[0]["ltm_revenue"]) else None
     ltm_lbl = ltm_row.iloc[0]["ltm_label"] if not ltm_row.empty else "—"
