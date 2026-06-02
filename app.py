@@ -636,30 +636,36 @@ def load_kpis(company_id: int) -> pd.DataFrame:
 
     # Gross margin fallback: derive from gross_profit_usd if margin not stored
     mask = df["gross_margin_pct"].isna() & df["gross_profit_usd"].notna() & rev.notna()
-    df.loc[mask, "gross_margin_pct"] = (
-        df.loc[mask, "gross_profit_usd"]
-        .div(df.loc[mask, "revenue_usd"].replace(0, float("nan")))
-        .mul(100)
-        .round(4)
-    )
+    if mask.any():
+        safe_rev = df.loc[mask, "revenue_usd"].replace(0, float("nan"))
+        df.loc[mask, "gross_margin_pct"] = (
+            df.loc[mask, "gross_profit_usd"].astype(float)
+            .div(safe_rev.astype(float))
+            .mul(100)
+            .round(4)
+        )
 
     # EBITDA margin fallback
     mask = df["ebitda_margin_pct"].isna() & df["ebitda_usd"].notna() & rev.notna()
-    df.loc[mask, "ebitda_margin_pct"] = (
-        df.loc[mask, "ebitda_usd"]
-        .div(df.loc[mask, "revenue_usd"].replace(0, float("nan")))
-        .mul(100)
-        .round(4)
-    )
+    if mask.any():
+        safe_rev = df.loc[mask, "revenue_usd"].replace(0, float("nan"))
+        df.loc[mask, "ebitda_margin_pct"] = (
+            df.loc[mask, "ebitda_usd"].astype(float)
+            .div(safe_rev.astype(float))
+            .mul(100)
+            .round(4)
+        )
 
     # Net margin fallback
     mask = df["net_margin_pct"].isna() & df["net_income_usd"].notna() & rev.notna()
-    df.loc[mask, "net_margin_pct"] = (
-        df.loc[mask, "net_income_usd"]
-        .div(df.loc[mask, "revenue_usd"].replace(0, float("nan")))
-        .mul(100)
-        .round(4)
-    )
+    if mask.any():
+        safe_rev = df.loc[mask, "revenue_usd"].replace(0, float("nan"))
+        df.loc[mask, "net_margin_pct"] = (
+            df.loc[mask, "net_income_usd"].astype(float)
+            .div(safe_rev.astype(float))
+            .mul(100)
+            .round(4)
+        )
 
     return df
 
