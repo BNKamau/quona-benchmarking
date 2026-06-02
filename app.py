@@ -1068,16 +1068,27 @@ def render_benchmarking_tab(
     comp_mapping = load_comp_mapping(company_name)
 
     if comp_mapping.empty:
-        st.markdown(
-            f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
-            f"padding:40px;text-align:center;color:{MUTED};font-size:14px;line-height:2'>"
-            f"No comp set mapped yet for <b style='color:{BLACK}'>{company_name}</b>.<br>"
-            f"<small>Sector: <b>{sector_label(info.get('sector',''))}</b>"
-            f" &nbsp;·&nbsp; Sub-sector: "
-            f"<b>{(info.get('sub_sector') or '—').replace('_',' ').title()}</b></small>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
+        if company_name == "Cowrywise":
+            st.markdown(
+                f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
+                f"padding:20px 24px;color:{MUTED};font-size:13px;line-height:1.8'>"
+                f"No direct wealthtech exit comps exist at scale for Nigeria. "
+                f"Benchmarking uses EM digital wealth management proxies. "
+                f"Add comps via the Upload Data tab to improve accuracy."
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
+                f"padding:40px;text-align:center;color:{MUTED};font-size:14px;line-height:2'>"
+                f"No comp set mapped yet for <b style='color:{BLACK}'>{company_name}</b>.<br>"
+                f"<small>Sector: <b>{sector_label(info.get('sector',''))}</b>"
+                f" &nbsp;·&nbsp; Sub-sector: "
+                f"<b>{(info.get('sub_sector') or '—').replace('_',' ').title()}</b></small>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
         return
 
     comp_ids = tuple(comp_mapping["comp_id"].tolist())
@@ -2850,6 +2861,378 @@ def fetch_last_affinity_note_for_buyer(buyer_name: str, affinity_api_key: str) -
         return None
 
 
+# ── Cowrywise custom exit tab ────────────────────────────────────────────────
+
+def _render_cowrywise_exit_tab() -> None:
+    # ── Section 1: Exit Pathways (collapsed) ─────────────────────────────────
+    AMBER     = "#FFC107"
+    GREEN_DOT = "#D5FA94"
+    EMPTY     = "#D4D5CE"
+
+    def _pathway_card(title, valuation, description, feasibility_dots, tag, highlight=False):
+        border_extra = "border-left:3px solid #D5FA94;" if highlight else ""
+        dots_html = "".join(
+            f"<span style='display:inline-block;width:10px;height:10px;border-radius:50%;"
+            f"background:{d};margin-right:3px'></span>"
+            for d in feasibility_dots
+        )
+        rev_line = (
+            f"<div style='font-size:12px;color:{MUTED};margin-top:2px'>{valuation[1]}</div>"
+            if len(valuation) > 1 else ""
+        )
+        return f"""
+<div style='background:#FFFFFF;border:1px solid #D4D5CE;{border_extra}border-radius:8px;
+     padding:16px;height:100%'>
+  <div style='font-size:14px;font-weight:700;color:#2C2C2A;margin-bottom:4px'>{title}</div>
+  <div style='font-size:10px;color:#93A3A1;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px'>Valuation</div>
+  <div style='font-size:13px;color:#2C2C2A'>{valuation[0]}</div>
+  {rev_line}
+  <div style='font-size:12px;color:#93A3A1;font-style:italic;margin:6px 0 8px'>{description}</div>
+  <div style='margin:4px 0 8px'>{dots_html}</div>
+  <span style='font-size:11px;font-weight:600;color:{MUTED};background:#EFF0EA;
+    border-radius:4px;padding:2px 7px'>{tag}</span>
+</div>"""
+
+    pathways = [
+        (
+            "Remain Independent — Quona Pursues Secondaries",
+            ["$50–100M"],
+            "Founders comfortable staying; capital-light model sustains growth but limits investor liquidity. Quona secondary most likely near-term outcome.",
+            [AMBER, AMBER, EMPTY], "Plan B — Q3 2027", False,
+        ),
+        (
+            "MBO / Majority Acquisition",
+            ["$80–150M", "4–8x revenue"],
+            "Management buyout or majority acquisition that cleans up the cap table while keeping founders in seat — flagged as viable given founder preference",
+            [AMBER, AMBER, EMPTY], "Founder preferred path", False,
+        ),
+        (
+            "Strategic Sale",
+            ["$100–200M", "5–10x revenue"],
+            "Acquisition by Nigerian bank, pan-African insurer, or strategic fintech — most value-maximising path at $20M+ ARR",
+            [GREEN_DOT, GREEN_DOT, GREEN_DOT], "Plan A — Q2 2027", True,
+        ),
+        (
+            "PE Acquisition",
+            ["$80–150M", "4–8x revenue"],
+            "KKR or IFC-led transaction providing full or partial liquidity — both parties already in active dialogue with the company",
+            [GREEN_DOT, AMBER, EMPTY], "Active conversations", False,
+        ),
+    ]
+
+    with st.expander("Exit Pathways — click to expand", expanded=False):
+        row1, row2 = st.columns(2), st.columns(2)
+        for idx, (title, val, desc, dots, tag, highlight) in enumerate(pathways):
+            col = row1[idx] if idx < 2 else row2[idx - 2]
+            with col:
+                st.markdown(_pathway_card(title, val, desc, dots, tag, highlight), unsafe_allow_html=True)
+                st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 2: Implied Valuation Range ───────────────────────────────────
+    cowrywise_id_row = pd.read_sql_query(
+        "SELECT id FROM companies WHERE name = 'Cowrywise' LIMIT 1", _conn()
+    )
+    ltm_revenue = None
+    if not cowrywise_id_row.empty:
+        cowrywise_id = int(cowrywise_id_row.iloc[0]["id"])
+        ltm_df       = load_ltm_revenue()
+        _crow        = ltm_df[ltm_df["id"] == cowrywise_id]
+        if not _crow.empty and _crow.iloc[0]["ltm_revenue"] is not None:
+            ltm_revenue = float(_crow.iloc[0]["ltm_revenue"])
+
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 6px 0;letter-spacing:.3px'>Implied Valuation Range</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:16px'>"
+        f"Based on EM digital wealth platform multiples and active KKR / IFC dialogue. "
+        f"LTM Revenue: {fmt_usd(ltm_revenue)}</div>",
+        unsafe_allow_html=True,
+    )
+
+    _HDR = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px"
+    )
+    hcols = st.columns([2, 1, 1, 1, 2])
+    for hc, lbl in zip(hcols, ["Pathway", "Multiple", "Low Case", "Base Case", "High Case"]):
+        with hc:
+            st.markdown(f"<div style='{_HDR}'>{lbl}</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='height:2px;background:{BORDER};margin:6px 0 10px'></div>",
+        unsafe_allow_html=True,
+    )
+
+    def _val_row(pathway_name, tag, tag_bg, tag_fg, multiple_lbl,
+                 low, base, high, base_color, note):
+        cols = st.columns([2, 1, 1, 1, 2])
+        with cols[0]:
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:700;color:{BLACK};padding-top:4px'>"
+                f"{pathway_name}</div>"
+                f"<span style='font-size:11px;font-weight:600;background:{tag_bg};color:{tag_fg};"
+                f"border-radius:4px;padding:2px 7px'>{tag}</span>",
+                unsafe_allow_html=True,
+            )
+        with cols[1]:
+            st.markdown(
+                f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{multiple_lbl}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[2]:
+            st.markdown(
+                f"<div style='font-size:14px;color:{BLACK};padding-top:6px'>{fmt_usd(low)}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[3]:
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:700;color:{base_color};padding-top:6px'>"
+                f"{fmt_usd(base)}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[4]:
+            st.markdown(
+                f"<div style='font-size:14px;color:{MUTED};padding-top:6px'>Up to {fmt_usd(high)}</div>",
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            f"<div style='font-size:11px;color:{MUTED};font-style:italic;margin:4px 0 8px'>{note}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"<hr style='border-color:{BORDER};margin:8px 0'>", unsafe_allow_html=True)
+
+    r = ltm_revenue or 0
+    _val_row(
+        "Strategic Sale",
+        "Plan A — Q2 2027", GREEN, BLACK,
+        "5–10x Revenue",
+        r * 5, r * 7.5, r * 10,
+        "#2E7D32",
+        "Nigerian digital financial services acquisitions by banks and insurers typically price on "
+        "user base and AUM scale — no direct Nigeria wealthtech comp at scale exists",
+    )
+    _val_row(
+        "PE Acquisition",
+        "Active conversations", BLUE, "#1565C0",
+        "4–8x Revenue",
+        r * 4, r * 6, r * 8,
+        "#1565C0",
+        "KKR Global Impact and IFC both in dialogue. PE buyers at this scale typically apply EBITDA "
+        "or revenue multiples; $20M ARR target by end 2026 is the key trigger",
+    )
+    _val_row(
+        "MBO / Majority Acquisition",
+        "Founder preferred", "#D4D5CE", BLACK,
+        "4–6x Revenue",
+        r * 4, r * 5, r * 6,
+        BLACK,
+        "MBO pricing reflects control premium discount vs strategic sale; founders comfortable "
+        "remaining post-transaction",
+    )
+    _val_row(
+        "Remain Independent — Quona Pursues Secondaries",
+        "Plan B", "#D4D5CE", BLACK,
+        "3–5x Revenue",
+        r * 3, r * 4, r * 5,
+        BLACK,
+        "Secondary transaction at modest multiple if Plan A and PE routes do not materialise by Q3 2027",
+    )
+
+    st.markdown(
+        f"<div style='background:{BG};border-radius:8px;padding:12px 16px;"
+        f"font-size:11px;color:{MUTED};margin-top:8px'>"
+        f"Valuation ranges are indicative. No direct Nigeria wealthtech exit comp exists at meaningful scale. "
+        f"Ranges anchored to Cowrywise's $20M ARR target (end 2026), comparable EM digital wealth platform "
+        f"multiples, and active KKR and IFC dialogue. Actual exit value will depend on ARR achievement, "
+        f"AUM scale, and competitive tension in any sale process."
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 3: Acquirer Universe ─────────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 12px 0;letter-spacing:.3px'>Acquirer Universe — Prioritized</div>",
+        unsafe_allow_html=True,
+    )
+
+    FIT_COLORS = {
+        "Very High":  ("#D5FA94", "#2C2C2A"),
+        "High":       ("#C5E5FF", "#1565C0"),
+        "Medium":     ("#D4D5CE", "#2C2C2A"),
+        "Low-Medium": ("#FFCDD2", "#B71C1C"),
+        "Low":        ("#FFCDD2", "#B71C1C"),
+    }
+
+    def _fit_badge(fit):
+        bg, fg = FIT_COLORS.get(fit, ("#D4D5CE", "#2C2C2A"))
+        return (
+            f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:600;"
+            f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>"
+        )
+
+    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0, affinity_override=None):
+        row_bg = "#EFF0EA" if row_idx % 2 == 0 else "#FFFFFF"
+        with st.container():
+            st.markdown(
+                f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
+                unsafe_allow_html=True,
+            )
+            cols = st.columns([2, 2, 3, 1, 2])
+            with cols[0]:
+                st.markdown(
+                    f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"{_fit_badge(fit)}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[1]:
+                st.markdown(
+                    f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{activity}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[2]:
+                st.markdown(
+                    f"<div style='font-size:13px;color:#2C2C2A;padding-top:6px'>{rationale}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[3]:
+                st.checkbox("", key=key)
+            with cols[4]:
+                if affinity_override is not None:
+                    st.markdown(
+                        f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{affinity_override}</div>",
+                        unsafe_allow_html=True,
+                    )
+                elif affinity_cache is None:
+                    st.markdown(
+                        f"<div style='font-size:11px;color:{MUTED};padding-top:8px'>Sync Affinity above</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    note = affinity_cache.get(name)
+                    if note is None:
+                        st.markdown(
+                            f"<div style='font-size:11px;color:{MUTED};font-style:italic;padding-top:8px'>Not in Affinity</div>",
+                            unsafe_allow_html=True,
+                        )
+                    elif note.get("stale"):
+                        st.markdown(
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            unsafe_allow_html=True,
+                        )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    local_buyers = [
+        ("Moniepoint", "Very High",
+         "Unicorn status (Nov 2024, $1B+ valuation); founder-to-founder engagement with Cowrywise already active",
+         "Cowrywise's 1M+ user wealth platform extends Moniepoint's SME and consumer financial services into savings and investment"),
+        ("Flutterwave", "High",
+         "Acquired Mono Technologies (all-stock, 2025); building toward a full-stack African fintech platform",
+         "Cowrywise's investment and savings layer would complete Flutterwave's consumer fintech stack alongside payments"),
+        ("GTBank / HabariPay", "High",
+         "Scaling HabariPay digital financial services; GTBank has one of Nigeria's largest retail customer bases",
+         "Cowrywise's SEC-licensed wealth platform and 1M+ users give GTBank instant digital investment distribution"),
+        ("Stanbic IBTC", "High",
+         "Nigeria's leading wealth and asset management bank; actively digitising investment products",
+         "Direct product overlap — Cowrywise's retail digital wealth platform would accelerate Stanbic IBTC's mass-market investment distribution"),
+        ("PiggyVest", "Medium",
+         "Paid out NGN 835B ($547M) to users in 2024; exploring broader investment products",
+         "Merger would create Nigeria's dominant retail savings and investment platform, strengthening exit narrative ahead of a larger strategic sale"),
+    ]
+
+    global_buyers = [
+        ("KKR", "Very High",
+         "$686B AUM; Global Impact and Growth Equity strategies actively targeting financial inclusion and EM fintech",
+         "Already in active conversation with Cowrywise founders — highest near-term conviction buyer in the universe"),
+        ("IFC", "Very High",
+         "Active pan-African fintech investor; has been circling Cowrywise for several years",
+         "IFC's financial inclusion mandate aligns directly with Cowrywise's mass-market Nigeria wealth platform — DFI financing or equity stake"),
+        ("Old Mutual", "High",
+         "Expanding digital wealth and insurance distribution across Africa; recently entered Nigerian banking",
+         "Cowrywise's SEC-licensed platform and 1M+ users give Old Mutual instant Nigerian retail investment distribution"),
+        ("Sanlam", "High",
+         "Pan-African insurer with growing Nigerian retail financial services presence via Sanlam Nigeria",
+         "Cowrywise's digital-first wealth distribution model complements Sanlam's Nigeria insurance and savings push"),
+        ("Franklin Templeton", "Medium",
+         "Active in Africa through local fund partnerships; expanding retail investment access across EM",
+         "Cowrywise's fund distribution infrastructure could serve as Franklin Templeton's Nigeria retail investment channel"),
+    ]
+
+    secondaries_buyers = [
+        ("Alphacode", "High",
+         "$80M deployed across SA and Nigerian fintechs; latest deal August 2025",
+         "Cowrywise is the leading Nigeria wealthtech — natural fit for Alphacode's fintech portfolio and RMI's wealth management ambitions"),
+        ("Partech", "High",
+         "Closed €280M second Africa fund 2024; one of most active Series A/B investors in Africa 2025",
+         "Cowrywise at $20M ARR is exactly the growth-stage asset Partech's second fund targets"),
+        ("Norrsken22", "Medium",
+         "$205M fund; backed TymeBank and Stitch; Nigeria exposure limited",
+         "Cowrywise would add Nigeria wealthtech exposure to a portfolio currently concentrated in SA and payments"),
+    ]
+
+    affinity_cache = st.session_state.get("cowrywise_affinity_data")
+    _, _sync_btn_col = st.columns([6, 1])
+    with _sync_btn_col:
+        if st.button("Sync Affinity", key="cowrywise_affinity_sync"):
+            _api_key  = st.secrets.get("AFFINITY_API_KEY", "")
+            all_names = list(dict.fromkeys(
+                [b[0] for b in local_buyers]
+                + [g[0] for g in global_buyers]
+                + [s[0] for s in secondaries_buyers]
+            ))
+            with st.spinner("Fetching Affinity data for all buyers…"):
+                st.session_state["cowrywise_affinity_data"] = {
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    for bname in all_names
+                }
+            st.rerun()
+
+    _HDR_STYLE = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px;padding-bottom:4px"
+    )
+
+    def _header_row():
+        hcols  = st.columns([2, 2, 3, 1, 2])
+        labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage Q3?", "Last Affinity Contact"]
+        for hc, lbl in zip(hcols, labels):
+            with hc:
+                st.markdown(f"<div style='{_HDR_STYLE}'>{lbl}</div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:2px;background:#EFF0EA;margin-bottom:8px'></div>", unsafe_allow_html=True)
+
+    tab_local, tab_global, tab_sec = st.tabs(["Local Buyers", "Global Buyers", "Secondaries Buyers"])
+    with tab_local:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(local_buyers):
+            key = "engage_cowrywise_" + name.replace(" ", "").replace("/", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+    with tab_global:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(global_buyers):
+            key = "engage_cowrywise_" + name.replace(" ", "").replace("/", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+    with tab_sec:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(secondaries_buyers):
+            key = "engage_cowrywise_sec_" + name.replace(" ", "").replace("/", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+
 # ── VertoFX custom exit tab ──────────────────────────────────────────────────
 
 def _render_vertofx_exit_tab() -> None:
@@ -3887,6 +4270,11 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
     sector       = str(info.get("sector", "")).lower()
     _today       = datetime.utcnow()
     cur_q        = f"Q{(_today.month - 1) // 3 + 1} {_today.year}"
+
+    # ── Cowrywise custom exit tab ──────────────────────────────────────────────
+    if company_name == "Cowrywise":
+        _render_cowrywise_exit_tab()
+        return
 
     # ── Yoco custom exit tab ───────────────────────────────────────────────────
     if company_name == "Yoco":
