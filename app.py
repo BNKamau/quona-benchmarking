@@ -6424,11 +6424,11 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
 
 
 # ── Authentication gate ───────────────────────────────────────────────────────
-if not st.experimental_user.is_logged_in:
-    st.login()
+if not st.user.is_logged_in:
+    st.login("google")
     st.stop()
 
-if not st.experimental_user.email.endswith("@quona.com"):
+if not st.user.email.endswith("@quona.com"):
     st.error("Access restricted to @quona.com accounts.")
     st.logout()
     st.stop()
@@ -6442,7 +6442,7 @@ if "page" not in st.session_state:
     st.session_state.page = "home"
     st.session_state.company_id = None
 
-st.sidebar.write(f"Signed in as {st.experimental_user.email}")
+st.sidebar.write(f"Signed in as {st.user.email}")
 if st.sidebar.button("Sign out"):
     st.logout()
 

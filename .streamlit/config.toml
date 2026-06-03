@@ -1,3 +1,2 @@
-[auth]
-redirect_uri = "https://quona-benchmarking-kcstcmzvzhmrchxoael49m.streamlit.app/oauth2callback"
-cookie_secret = "d8fb634943545d3fa5dccbac51e5dad7"
+[theme]
+base = "light"
