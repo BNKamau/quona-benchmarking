@@ -1145,63 +1145,147 @@ def render_benchmarking_tab(
                 unsafe_allow_html=True,
             )
         elif company_name == "Khazna":
-            _KHAZNA_COMPS = [
-                # (Company, Sector, Status, Deal/Val, Revenue, GrossMargin, EBITDAMargin, ActiveUsers, Multiple, KeyNote)
-                ("Payfare",    "EWA + Digital Banking (Gig)",       "Acquired by Fiserv Dec 2024", "$147M",        "$235M (2024)",    "26%",           "~15%",          "1.5M workers",  "~0.6x rev",  "90% premium to share price at acquisition; depressed public market multiple"),
-                ("DailyPay",   "EWA (Employer-paid B2B)",           "Private",                     "$1.75B (2024)","$235M (2024)",    "Not disclosed", "Not disclosed", "6M employees",  "~7x rev",    "Chime offered $2B in 2022; IPO eyeing $3–4B valuation"),
-                ("MNT-Halan",  "Egypt Digital Bank / Lending",      "Private Unicorn",              "$1B+ (2023)",  "$300M+ (2022)",   "Not disclosed", "Profitable",    "7M users",      "~3x rev",    "Closest Egypt comp; $12B+ in loans disbursed"),
-                ("Wagestream", "EWA + Financial Wellness",          "Private",                      "~$300M+ est.", "Not disclosed",   "Not disclosed", "Not disclosed", "1M+ workers",   "—",          "Already holds Khazna stake — most important signal in acquirer universe"),
+            # ── Disclaimer ────────────────────────────────────────────────────
+            st.markdown(
+                f"<div style='background:{WARN_BG};border:1px solid {WARN};border-radius:8px;"
+                f"padding:10px 14px;font-size:12px;color:{WARN};margin-bottom:16px'>"
+                f"<b>Note:</b> Comp set is limited given Khazna's unique positioning as an Egypt/KSA digital "
+                f"workforce bank. Payfare is the only publicly listed pure-play EWA comp. MNT-Halan is the "
+                f"closest Egypt digital banking comp. Data points will improve as more comps are added to "
+                f"the exit database.</div>",
+                unsafe_allow_html=True,
+            )
+            # ── Live Khazna data ───────────────────────────────────────────────
+            _kh_rev = ltm_val
+            _kh_gm  = ltm_gm_pct
+            _kh_em  = ltm_em_pct
+            _kh_ac  = None
+            if not kpis.empty and "active_clients_count" in kpis.columns:
+                _ac_s = kpis["active_clients_count"].dropna()
+                if not _ac_s.empty:
+                    _kh_ac = float(_ac_s.iloc[-1])
+            # ── Normalisers (0–100 scale) ──────────────────────────────────────
+            _REV_MAX = 300e6; _GM_MAX = 30.0; _EM_MIN, _EM_MAX = -20.0, 20.0; _USR_MAX = 7e6
+            def _nr(v): return None if v is None else min(float(v) / _REV_MAX * 100, 100)
+            def _ng(v): return None if v is None else min(max(float(v) / _GM_MAX * 100, 0), 100)
+            def _ne(v): return None if v is None else min(max((float(v) - _EM_MIN) / (_EM_MAX - _EM_MIN) * 100, 0), 100)
+            def _nu(v): return None if (v is None or float(v) <= 0) else min(math.log10(float(v) + 1) / math.log10(_USR_MAX + 1) * 100, 100)
+            _cats = ["Revenue", "Gross Margin", "EBITDA Margin", "Active Users"]
+            _traces = [
+                ("Khazna",              [_nr(_kh_rev), _ng(_kh_gm), _ne(_kh_em), _nu(_kh_ac)], BLACK,    "rgba(213,250,148,0.35)", "solid", 2.5, True),
+                ("Payfare",             [_nr(235e6),   _ng(26.0),   _ne(15.0),   _nu(1.5e6)],  "#1565C0", "rgba(197,229,255,0.20)", "dot",   1.5, False),
+                ("DailyPay (partial)",  [_nr(235e6),   None,        None,        _nu(6e6)],     "#E65100", "rgba(0,0,0,0)",          "dot",   1.5, False),
+                ("MNT-Halan (partial)", [_nr(300e6),   None,        None,        _nu(7e6)],     "#6A1B9A", "rgba(0,0,0,0)",          "dot",   1.5, False),
             ]
-            _khazna_cols_w = "0.7fr 1.1fr 1fr 0.8fr 0.8fr 0.55fr 0.6fr 0.75fr 0.55fr 1.6fr"
-            _khazna_hdrs   = ["Company", "Sector", "Status", "Deal / Val", "Revenue", "Gross Margin", "EBITDA Margin", "Active Users", "Multiple", "Key Note"]
-            _hdr_st = "font-size:9px;font-weight:700;color:#93A3A1;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px"
-            _khazna_header_html = (
-                f"<div style='display:grid;grid-template-columns:{_khazna_cols_w};"
-                f"border-bottom:1px solid {BORDER};margin-bottom:4px'>"
-                + "".join(f"<div style='{_hdr_st}'>{h}</div>" for h in _khazna_hdrs)
+            fig_kh = go.Figure()
+            for _tn, _tv, _tc, _tf, _td, _tw, _tfill in _traces:
+                fig_kh.add_trace(go.Scatterpolar(
+                    r=_tv + [_tv[0]], theta=_cats + [_cats[0]],
+                    fill="toself" if _tfill else "none", fillcolor=_tf,
+                    line=dict(color=_tc, width=_tw, dash=_td), name=_tn,
+                    connectgaps=False,
+                    hovertemplate="%{theta}: %{r:.0f}/100<extra>" + _tn + "</extra>",
+                ))
+            fig_kh.update_layout(
+                polar=dict(
+                    bgcolor=WHITE,
+                    radialaxis=dict(visible=False, range=[0, 100]),
+                    angularaxis=dict(tickfont=dict(size=11, color=BLACK), linecolor=BORDER, gridcolor=BORDER),
+                ),
+                showlegend=True,
+                legend=dict(
+                    font=dict(size=11, color=BLACK), bgcolor=WHITE, bordercolor=BORDER, borderwidth=1,
+                    orientation="h", yanchor="bottom", y=-0.20, xanchor="center", x=0.5,
+                ),
+                paper_bgcolor=BG, margin=dict(l=30, r=30, t=20, b=70), height=420,
+            )
+            st.markdown(
+                f"<div style='font-size:13px;font-weight:500;color:{MUTED};margin:0 0 4px 0'>"
+                f"EWA and Digital Workforce Banking — Benchmarking (Indexed 0–100)</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div style='font-size:11px;color:{MUTED};margin-bottom:12px'>"
+                f"Dotted lines indicate partial data — gaps where values are not disclosed. "
+                f"Revenue indexed to $300M. Active Users on log scale (max 7M). EBITDA Margin range −20% to +20%.</div>",
+                unsafe_allow_html=True,
+            )
+            st.plotly_chart(fig_kh, use_container_width=True, config={"displayModeBar": False})
+            # ── Metrics comparison table ───────────────────────────────────────
+            st.markdown(
+                f"<div style='font-size:13px;font-weight:500;color:{MUTED};margin:20px 0 10px;letter-spacing:.3px'>"
+                f"Metrics Comparison</div>",
+                unsafe_allow_html=True,
+            )
+            _tc_w = "1.4fr 1fr 0.9fr 0.9fr 1fr"
+            _tc_h = ["Metric", "Khazna (live)", "Payfare", "DailyPay", "MNT-Halan"]
+            _tc_hs = f"font-size:10px;font-weight:700;color:#93A3A1;text-transform:uppercase;letter-spacing:.5px;padding:8px 12px"
+            _tc_head = (
+                f"<div style='display:grid;grid-template-columns:{_tc_w};border-bottom:1px solid {BORDER};margin-bottom:4px'>"
+                + "".join(f"<div style='{_tc_hs}'>{h}</div>" for h in _tc_h)
                 + "</div>"
             )
-            _khazna_rows_html = ""
-            for i, (co, sec, status, deal, rev, gm, em, users, mult, knote) in enumerate(_KHAZNA_COMPS):
-                _bg = "#F7F8F5" if i % 2 == 0 else "#FFFFFF"
-                _acq = status.startswith("Acquired")
-                _st_col = "#2E7D32" if _acq else (MUTED if status == "Private" or status.startswith("Private") else BLACK)
-                _cell = "font-size:11px;color:#888884;padding:7px 10px;line-height:1.4"
-                _khazna_rows_html += (
-                    f"<div style='display:grid;grid-template-columns:{_khazna_cols_w};"
-                    f"background:{_bg};border-radius:4px'>"
-                    f"<div style='font-size:12px;font-weight:700;color:{BLACK};padding:7px 10px'>{co}</div>"
-                    f"<div style='{_cell}'>{sec}</div>"
-                    f"<div style='font-size:11px;font-weight:600;color:{_st_col};padding:7px 10px'>{status}</div>"
-                    f"<div style='font-size:12px;font-weight:600;color:{BLACK};padding:7px 10px'>{deal}</div>"
-                    f"<div style='{_cell}'>{rev}</div>"
-                    f"<div style='{_cell}'>{gm}</div>"
-                    f"<div style='{_cell}'>{em}</div>"
-                    f"<div style='{_cell}'>{users}</div>"
-                    f"<div style='font-size:12px;font-weight:600;color:{BLACK};padding:7px 10px'>{mult}</div>"
-                    f"<div style='{_cell}'>{knote}</div>"
+            _tc_rows_data = [
+                ("Revenue",                      fmt_usd(_kh_rev) if _kh_rev else "No data uploaded", "$235M",  "$235M",   "$300M+"),
+                ("Gross Margin %",               fmt_pct(_kh_gm) if _kh_gm is not None else "N/A",    "26%",    "N/A",     "N/A"),
+                ("EBITDA Margin %",              fmt_pct(_kh_em) if _kh_em is not None else "N/A",    "~15%",   "N/A",     "Profitable"),
+                ("Active Users / Workers",       fmt_int(_kh_ac) if _kh_ac else "N/A",                "1.5M",   "6M",      "7M"),
+                ("Revenue Multiple at Exit",     "N/A",                                                "~0.6x",  "~7x",     "~3x"),
+            ]
+            _tc_rows_html = ""
+            for _i, (_m, _kh, _pf, _dp, _mh) in enumerate(_tc_rows_data):
+                _bg2 = "#F7F8F5" if _i % 2 == 0 else "#FFFFFF"
+                _cc = f"font-size:12px;color:{MUTED};padding:9px 12px"
+                _tc_rows_html += (
+                    f"<div style='display:grid;grid-template-columns:{_tc_w};background:{_bg2};border-radius:4px'>"
+                    f"<div style='font-size:12px;font-weight:600;color:{BLACK};padding:9px 12px'>{_m}</div>"
+                    f"<div style='font-size:13px;font-weight:700;color:{BLACK};padding:9px 12px'>{_kh}</div>"
+                    f"<div style='{_cc}'>{_pf}</div>"
+                    f"<div style='{_cc}'>{_dp}</div>"
+                    f"<div style='{_cc}'>{_mh}</div>"
                     f"</div>"
                 )
             st.markdown(
-                f"<div style='font-size:12px;font-weight:700;color:{MUTED};text-transform:uppercase;"
-                f"letter-spacing:.5px;margin-bottom:6px'>Exit Comp Set — EWA and Digital Workforce Banking</div>",
+                f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;padding:14px 4px;overflow:hidden'>"
+                + _tc_head + _tc_rows_html + "</div>",
                 unsafe_allow_html=True,
             )
+            st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+            # ── Comp set reference cards ───────────────────────────────────────
             st.markdown(
-                f"<div style='font-size:11px;color:{MUTED};margin-bottom:10px;line-height:1.6'>"
-                f"Khazna benchmarked against global EWA and EM digital banking comps. "
-                f"ARR multiples used given early revenue stage.</div>",
+                f"<div style='font-size:13px;font-weight:500;color:{MUTED};margin:0 0 10px;letter-spacing:.3px'>"
+                f"Comp Set — EWA and Digital Workforce Banking</div>",
                 unsafe_allow_html=True,
             )
+            _ref_comps = [
+                ("Payfare",    "#1565C0", "Acquired by Fiserv", "Dec 2024", "$147M",        "~0.6x rev", "Pure-play EWA + gig banking. 90% premium to last share price. Only listed EWA pure-play."),
+                ("DailyPay",   "#E65100", "Private",            "—",        "$1.75B (2024)", "~7x rev",   "Employer-paid B2B EWA. 6M employees. Chime offered $2B in 2022; IPO eyeing $3–4B."),
+                ("MNT-Halan",  "#6A1B9A", "Private Unicorn",    "—",        "$1B+ (2023)",   "~3x rev",   "Closest Egypt comp. $12B+ in loans disbursed. 7M users. Digital bank + lending."),
+                ("Wagestream", MUTED,     "Investor (Stake)",   "—",        "~$300M+ est.",  "—",         "Already holds Khazna stake. Global EWA portfolio (Refyne, GajiGesa). Most important signal."),
+            ]
+            _ref_cols = st.columns(2)
+            for _i, (_co, _col, _st2, _dt, _vl, _mu, _nt) in enumerate(_ref_comps):
+                with _ref_cols[_i % 2]:
+                    st.markdown(
+                        f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:8px;padding:14px 16px;margin-bottom:10px'>"
+                        f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:8px'>"
+                        f"<span style='font-size:14px;font-weight:700;color:{BLACK}'>{_co}</span>"
+                        f"<span style='font-size:11px;font-weight:600;color:{_col};background:{BG};border-radius:4px;padding:2px 7px'>{_st2}</span>"
+                        f"</div>"
+                        f"<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:8px'>"
+                        f"<div><div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.5px'>Date</div>"
+                        f"<div style='font-size:12px;font-weight:600;color:{BLACK}'>{_dt}</div></div>"
+                        f"<div><div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.5px'>Valuation</div>"
+                        f"<div style='font-size:12px;font-weight:600;color:{BLACK}'>{_vl}</div></div>"
+                        f"<div><div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.5px'>Multiple</div>"
+                        f"<div style='font-size:12px;font-weight:600;color:{_col}'>{_mu}</div></div>"
+                        f"</div>"
+                        f"<div style='font-size:11px;color:{MUTED};line-height:1.5'>{_nt}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
             st.markdown(
-                f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
-                f"padding:14px 4px;overflow:hidden'>"
-                + _khazna_header_html + _khazna_rows_html
-                + "</div>",
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f"<div style='font-size:11px;color:{MUTED};margin-top:10px;line-height:1.6'>"
+                f"<div style='font-size:11px;color:{MUTED};margin-top:4px;line-height:1.6'>"
                 f"Gross margin and EBITDA margin benchmarks based on Payfare (the only publicly listed pure-play EWA comp). "
                 f"Khazna's lending margin profile differs from pure EWA — PAR90 (0.4%) and loan book quality are the key "
                 f"credit metrics to track alongside revenue growth.</div>",
