@@ -15,7 +15,7 @@ import openpyxl
 FX_ZAR: float = 16.5
 FX_NGN: float = 1600.0   # NGN/USD — update periodically
 
-SUPPORTED_COMPANIES: set[str] = {"Yoco", "Lulalend", "Verto", "VertoFX", "MaxSoko", "Cowrywise", "Twinco", "TWINCO"}
+SUPPORTED_COMPANIES: set[str] = {"Yoco", "Lulalend", "Verto", "VertoFX", "MaxSoko", "Cowrywise", "Twinco", "TWINCO", "Khazna"}
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -860,6 +860,166 @@ def parse_twinco(file_bytes: bytes) -> list[dict]:
     return results
 
 
+# ── Khazna ────────────────────────────────────────────────────────────────────
+
+def parse_khazna(file_bytes: bytes) -> list[dict]:
+    """
+    Flexible label-based parser for Khazna Excel exports.
+
+    Auto-detects sheet, label column, currency, and date columns.
+    Currency defaults to USD (Quona typically receives USD-denominated reports).
+
+    Metrics extracted:
+      revenue_usd, gross_margin_pct, ebitda_usd, ebitda_margin_pct,
+      net_income_usd, net_margin_pct, arr_usd, loan_book_gross_usd,
+      par_90_pct, active_clients_count, revenue_growth_pct
+    """
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+
+    ws = _cwry_best_sheet(wb)
+    lc = _cwry_label_col(ws)
+
+    # Currency detection — default USD
+    fx, currency = 1.0, "USD"
+    for r in range(1, 20):
+        v = str(ws.cell(r, lc).value or "").lower()
+        if "egp" in v or "egyptian pound" in v:
+            fx, currency = 30.9, "EGP"
+            break
+        if "sar" in v or "riyal" in v:
+            fx, currency = 3.75, "SAR"
+            break
+
+    def _find(*labels, exact=False):
+        return _first_row(*labels, ws=ws, label_col=lc, exact=exact)
+
+    row_rev = _find(
+        "total revenue", "revenue", "net revenue", "total net revenue",
+        "revenues", "interest income", "financing income", "total income",
+    )
+    row_gp = _find("gross profit", "gross income")
+    row_gm = _find(
+        "gross margin %", "gross margin pct", "gross margin percentage",
+        "gross profit margin", "gross profit %", "gross margin",
+    )
+    row_ebt = (
+        _find("ebitda", exact=True)
+        or _find("adjusted ebitda", "total ebitda", "ebitda (loss)")
+        or _find("ebitda")
+    )
+    row_net = (
+        _find(
+            "net income", "net profit", "profit after tax", "pat",
+            "net profit/(loss)", "net income/(loss)", "net loss",
+            exact=True,
+        )
+        or _find("net income", "net profit", "profit after tax")
+    )
+    # ARR — annualised recurring revenue
+    row_arr = _find(
+        "arr", "annualised recurring revenue", "annual recurring revenue",
+        "annualised revenue", "annualized revenue",
+    )
+    # Loan book
+    row_lb = _find(
+        "loan book", "net loan book", "gross loan book", "loan portfolio",
+        "net loan portfolio", "gross loan portfolio", "outstanding loans",
+        "total loans", "loan receivables",
+    )
+    # PAR 90
+    row_par90 = _find(
+        "par 90", "par90", "par-90", "portfolio at risk 90",
+        "npl", "npl rate", "non-performing loans",
+        exact=True,
+    ) or _find("par 90", "par90", "npl")
+    # Active clients / workers
+    row_ac = _find(
+        "active clients", "active workers", "active employees", "active users",
+        "number of active clients", "total active clients", "registered workers",
+        "active borrowers", "enrolled workers",
+    )
+
+    if row_rev is None:
+        raise ValueError(
+            f"Cannot find a revenue row in sheet '{ws.title}' (label col {lc}). "
+            "Expected labels such as 'Revenue', 'Total Revenue', or 'Interest Income'."
+        )
+
+    date_cols = _cwry_date_cols(ws, lc)
+    if not date_cols:
+        raise ValueError(
+            f"No date columns found in sheet '{ws.title}'. "
+            "Expected month/year headers in rows 1–6."
+        )
+
+    results: list[dict] = []
+    for col, period in sorted(date_cols.items(), key=lambda x: x[1]):
+
+        def _g(row, _col=col):
+            return safe_float(ws.cell(row, _col).value) if row else None
+
+        rev_raw = _g(row_rev)
+        if not rev_raw:
+            continue
+
+        gp_raw  = _g(row_gp)
+        gm_raw  = _g(row_gm)
+        ebt_raw = _g(row_ebt)
+        net_raw = _g(row_net)
+        arr_raw = _g(row_arr)
+        lb_raw  = _g(row_lb)
+        p90_raw = _g(row_par90)
+        ac_raw  = _g(row_ac)
+
+        rev_usd = round(rev_raw / fx, 2)
+
+        if gm_raw is not None:
+            gm_pct = round(gm_raw * 100, 4) if abs(gm_raw) <= 1.5 else round(float(gm_raw), 4)
+        elif gp_raw is not None:
+            gm_pct = round(gp_raw / rev_raw * 100, 4)
+        else:
+            gm_pct = None
+
+        ebt_usd = round(ebt_raw / fx, 2) if ebt_raw is not None else None
+        em_pct  = round(ebt_raw / rev_raw * 100, 4) if ebt_raw is not None else None
+
+        net_usd = round(net_raw / fx, 2) if net_raw is not None else None
+        nm_pct  = round(net_raw / rev_raw * 100, 4) if net_raw is not None else None
+
+        arr_usd = round(arr_raw / fx, 2) if arr_raw is not None else None
+        lb_usd  = round(lb_raw  / fx, 2) if lb_raw  is not None else None
+
+        # PAR 90: accept decimal (0.004) or percentage (0.4) form
+        par90 = None
+        if p90_raw is not None:
+            par90 = round(p90_raw * 100, 4) if abs(p90_raw) < 1 else round(float(p90_raw), 4)
+
+        if results and results[-1].get("revenue_usd"):
+            prior = results[-1]["revenue_usd"]
+            rev_growth = round((rev_usd - prior) / prior * 100, 4) if prior > 0 else None
+        else:
+            rev_growth = None
+
+        results.append({
+            "period_end_date":      period,
+            "reporting_currency":   currency,
+            "fx_rate_to_usd":       fx,
+            "revenue_usd":          rev_usd,
+            "gross_margin_pct":     gm_pct,
+            "ebitda_usd":           ebt_usd,
+            "ebitda_margin_pct":    em_pct,
+            "net_income_usd":       net_usd,
+            "net_margin_pct":       nm_pct,
+            "arr_usd":              arr_usd,
+            "loan_book_gross_usd":  lb_usd,
+            "par_90_pct":           par90,
+            "active_clients_count": int(ac_raw) if ac_raw is not None else None,
+            "revenue_growth_pct":   rev_growth,
+        })
+
+    return results
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 PARSERS: dict[str, callable] = {
@@ -871,4 +1031,5 @@ PARSERS: dict[str, callable] = {
     "Cowrywise": parse_cowrywise,
     "Twinco":    parse_twinco,
     "TWINCO":    parse_twinco,
+    "Khazna":    parse_khazna,
 }

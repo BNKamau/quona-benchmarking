@@ -1144,6 +1144,69 @@ def render_benchmarking_tab(
                 f"</div>",
                 unsafe_allow_html=True,
             )
+        elif company_name == "Khazna":
+            _KHAZNA_COMPS = [
+                # (Company, Sector, Status, Deal/Val, Revenue, GrossMargin, EBITDAMargin, ActiveUsers, Multiple, KeyNote)
+                ("Payfare",    "EWA + Digital Banking (Gig)",       "Acquired by Fiserv Dec 2024", "$147M",        "$235M (2024)",    "26%",           "~15%",          "1.5M workers",  "~0.6x rev",  "90% premium to share price at acquisition; depressed public market multiple"),
+                ("DailyPay",   "EWA (Employer-paid B2B)",           "Private",                     "$1.75B (2024)","$235M (2024)",    "Not disclosed", "Not disclosed", "6M employees",  "~7x rev",    "Chime offered $2B in 2022; IPO eyeing $3–4B valuation"),
+                ("MNT-Halan",  "Egypt Digital Bank / Lending",      "Private Unicorn",              "$1B+ (2023)",  "$300M+ (2022)",   "Not disclosed", "Profitable",    "7M users",      "~3x rev",    "Closest Egypt comp; $12B+ in loans disbursed"),
+                ("Wagestream", "EWA + Financial Wellness",          "Private",                      "~$300M+ est.", "Not disclosed",   "Not disclosed", "Not disclosed", "1M+ workers",   "—",          "Already holds Khazna stake — most important signal in acquirer universe"),
+            ]
+            _khazna_cols_w = "0.7fr 1.1fr 1fr 0.8fr 0.8fr 0.55fr 0.6fr 0.75fr 0.55fr 1.6fr"
+            _khazna_hdrs   = ["Company", "Sector", "Status", "Deal / Val", "Revenue", "Gross Margin", "EBITDA Margin", "Active Users", "Multiple", "Key Note"]
+            _hdr_st = "font-size:9px;font-weight:700;color:#93A3A1;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px"
+            _khazna_header_html = (
+                f"<div style='display:grid;grid-template-columns:{_khazna_cols_w};"
+                f"border-bottom:1px solid {BORDER};margin-bottom:4px'>"
+                + "".join(f"<div style='{_hdr_st}'>{h}</div>" for h in _khazna_hdrs)
+                + "</div>"
+            )
+            _khazna_rows_html = ""
+            for i, (co, sec, status, deal, rev, gm, em, users, mult, knote) in enumerate(_KHAZNA_COMPS):
+                _bg = "#F7F8F5" if i % 2 == 0 else "#FFFFFF"
+                _acq = status.startswith("Acquired")
+                _st_col = "#2E7D32" if _acq else (MUTED if status == "Private" or status.startswith("Private") else BLACK)
+                _cell = "font-size:11px;color:#888884;padding:7px 10px;line-height:1.4"
+                _khazna_rows_html += (
+                    f"<div style='display:grid;grid-template-columns:{_khazna_cols_w};"
+                    f"background:{_bg};border-radius:4px'>"
+                    f"<div style='font-size:12px;font-weight:700;color:{BLACK};padding:7px 10px'>{co}</div>"
+                    f"<div style='{_cell}'>{sec}</div>"
+                    f"<div style='font-size:11px;font-weight:600;color:{_st_col};padding:7px 10px'>{status}</div>"
+                    f"<div style='font-size:12px;font-weight:600;color:{BLACK};padding:7px 10px'>{deal}</div>"
+                    f"<div style='{_cell}'>{rev}</div>"
+                    f"<div style='{_cell}'>{gm}</div>"
+                    f"<div style='{_cell}'>{em}</div>"
+                    f"<div style='{_cell}'>{users}</div>"
+                    f"<div style='font-size:12px;font-weight:600;color:{BLACK};padding:7px 10px'>{mult}</div>"
+                    f"<div style='{_cell}'>{knote}</div>"
+                    f"</div>"
+                )
+            st.markdown(
+                f"<div style='font-size:12px;font-weight:700;color:{MUTED};text-transform:uppercase;"
+                f"letter-spacing:.5px;margin-bottom:6px'>Exit Comp Set — EWA and Digital Workforce Banking</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div style='font-size:11px;color:{MUTED};margin-bottom:10px;line-height:1.6'>"
+                f"Khazna benchmarked against global EWA and EM digital banking comps. "
+                f"ARR multiples used given early revenue stage.</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
+                f"padding:14px 4px;overflow:hidden'>"
+                + _khazna_header_html + _khazna_rows_html
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div style='font-size:11px;color:{MUTED};margin-top:10px;line-height:1.6'>"
+                f"Gross margin and EBITDA margin benchmarks based on Payfare (the only publicly listed pure-play EWA comp). "
+                f"Khazna's lending margin profile differs from pure EWA — PAR90 (0.4%) and loan book quality are the key "
+                f"credit metrics to track alongside revenue growth.</div>",
+                unsafe_allow_html=True,
+            )
         elif company_name in ("TWINCO", "Twinco"):
             _TWINCO_COMPS = [
                 ("Demica",    "Supply Chain Finance Platform", "Acquired by FIS",   "Dec 2024", "$300M",           "$40B AuA — 40% CAGR platform assets"),
@@ -5276,6 +5339,380 @@ def _render_maxsoko_exit_tab() -> None:
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
 
+# ── Khazna custom exit tab ────────────────────────────────────────────────────
+
+def _render_khazna_exit_tab() -> None:
+    AMBER     = "#FFC107"
+    GREEN_DOT = "#D5FA94"
+    EMPTY     = "#D4D5CE"
+
+    # ── Look up company_id and LTM revenue ───────────────────────────────────
+    _kh_id_row = pd.read_sql_query(
+        "SELECT id FROM companies WHERE name = 'Khazna' LIMIT 1", _conn()
+    )
+    ltm_revenue = None
+    if not _kh_id_row.empty:
+        _kh_id  = int(_kh_id_row.iloc[0]["id"])
+        _ltm_df = load_ltm_revenue(db_version=_db_global_version())
+        _vrow   = _ltm_df[_ltm_df["id"] == _kh_id]
+        if not _vrow.empty and _vrow.iloc[0]["ltm_revenue"] is not None:
+            ltm_revenue = float(_vrow.iloc[0]["ltm_revenue"])
+
+    # ── Section 1: Exit Pathways (collapsed) ─────────────────────────────────
+    def _pathway_card(title, valuation, description, feasibility_dots, tag, highlight=False):
+        border_extra = "border-left:3px solid #D5FA94;" if highlight else ""
+        dots_html = "".join(
+            f"<span style='display:inline-block;width:10px;height:10px;border-radius:50%;"
+            f"background:{d};margin-right:3px'></span>"
+            for d in feasibility_dots
+        )
+        rev_line = (
+            f"<div style='font-size:12px;color:{MUTED};margin-top:2px'>{valuation[1]}</div>"
+            if len(valuation) > 1 else ""
+        )
+        return f"""
+<div style='background:#FFFFFF;border:1px solid #D4D5CE;{border_extra}border-radius:8px;
+     padding:16px;height:100%'>
+  <div style='font-size:14px;font-weight:700;color:#2C2C2A;margin-bottom:4px'>{title}</div>
+  <div style='font-size:10px;color:#93A3A1;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px'>Valuation</div>
+  <div style='font-size:13px;color:#2C2C2A'>{valuation[0]}</div>
+  {rev_line}
+  <div style='font-size:12px;color:#93A3A1;font-style:italic;margin:6px 0 8px'>{description}</div>
+  <div style='margin:4px 0 8px'>{dots_html}</div>
+  <span style='font-size:11px;font-weight:600;color:{MUTED};background:#EFF0EA;
+    border-radius:4px;padding:2px 7px'>{tag}</span>
+</div>"""
+
+    pathways = [
+        (
+            "Remain Independent — Quona Pursues Secondaries",
+            ["$80–150M", "8–15x ARR"],
+            "Continue scaling Egypt and KSA digital workforce banking independently — KSA SAMA license and Mudad partnership are the key value inflection points before any exit",
+            [AMBER, AMBER, EMPTY], "Unattractive near-term", False,
+        ),
+        (
+            "Full Acquisition by Wagestream",
+            ["$100–200M", "10–20x ARR"],
+            "Wagestream already holds a stake in Khazna and has built a global EWA portfolio including Refyne (India) and GajiGesa (Indonesia) — full acquisition is the most natural exit path",
+            [GREEN_DOT, GREEN_DOT, GREEN_DOT], "Most likely — existing shareholder", True,
+        ),
+        (
+            "Strategic Sale to GCC Bank or Payroll Platform",
+            ["$100–250M", "10–25x ARR"],
+            "Acquisition by a Saudi or UAE bank seeking to own workforce banking infrastructure — Arab National Bank and AlJazira Capital are existing investors and natural consolidators",
+            [GREEN_DOT, GREEN_DOT, AMBER], "High strategic fit — 24–36 months", False,
+        ),
+        (
+            "Strategic Sale to Global Payroll / HCM Platform",
+            ["$80–180M", "8–18x ARR"],
+            "Acquisition by ADP, Workday or SAP SuccessFactors to embed Khazna's EWA and workforce banking into their MENA payroll stack — Mudad integration makes Khazna highly relevant",
+            [AMBER, AMBER, EMPTY], "Possible — dependent on KSA scale", False,
+        ),
+    ]
+
+    with st.expander("Exit Pathways — click to expand", expanded=False):
+        row1, row2 = st.columns(2), st.columns(2)
+        for idx, (title, val, desc, dots, tag, highlight) in enumerate(pathways):
+            col = row1[idx] if idx < 2 else row2[idx - 2]
+            with col:
+                st.markdown(_pathway_card(title, val, desc, dots, tag, highlight), unsafe_allow_html=True)
+                st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 2: Implied Valuation Range ───────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 6px 0;letter-spacing:.3px'>Implied Valuation Range</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:16px'>"
+        f"Based on ARR multiples given Khazna's early revenue stage. "
+        f"LTM Revenue / ARR: {fmt_usd(ltm_revenue)}</div>",
+        unsafe_allow_html=True,
+    )
+
+    _HDR = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px"
+    )
+    hcols = st.columns([2, 1, 1, 1, 2])
+    for hc, lbl in zip(hcols, ["Pathway", "Multiple", "Low Case", "Base Case", "High Case"]):
+        with hc:
+            st.markdown(f"<div style='{_HDR}'>{lbl}</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='height:2px;background:{BORDER};margin:6px 0 10px'></div>",
+        unsafe_allow_html=True,
+    )
+
+    def _val_row(pathway_name, tag, tag_bg, tag_fg, multiple_lbl,
+                 low, base, high, base_color, note):
+        cols = st.columns([2, 1, 1, 1, 2])
+        with cols[0]:
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:700;color:{BLACK};padding-top:4px'>"
+                f"{pathway_name}</div>"
+                f"<span style='font-size:11px;font-weight:600;background:{tag_bg};color:{tag_fg};"
+                f"border-radius:4px;padding:2px 7px'>{tag}</span>",
+                unsafe_allow_html=True,
+            )
+        with cols[1]:
+            st.markdown(
+                f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{multiple_lbl}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[2]:
+            st.markdown(
+                f"<div style='font-size:14px;color:{BLACK};padding-top:6px'>{fmt_usd(low)}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[3]:
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:700;color:{base_color};padding-top:6px'>"
+                f"{fmt_usd(base)}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[4]:
+            st.markdown(
+                f"<div style='font-size:14px;color:{MUTED};padding-top:6px'>Up to {fmt_usd(high)}</div>",
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            f"<div style='font-size:11px;color:{MUTED};font-style:italic;margin:4px 0 8px'>{note}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"<hr style='border-color:{BORDER};margin:8px 0'>", unsafe_allow_html=True)
+
+    r = ltm_revenue or 0
+    _val_row(
+        "Full Acquisition by Wagestream",
+        "Most likely", GREEN, BLACK,
+        "10–20x ARR",
+        r * 10, r * 15, r * 20,
+        "#2E7D32",
+        "Wagestream acquired stakes in Khazna (Egypt), Refyne (India) and GajiGesa (Indonesia) as part of an EM "
+        "EWA consolidation strategy. Full acquisition at premium to minority stake entry is the natural next step. "
+        "Payfare acquired by Fiserv at ~0.6x revenue ($147M deal) — strategic acquirers pay ARR multiples for early-stage EWA.",
+    )
+    _val_row(
+        "Strategic Sale to GCC Bank",
+        "High strategic fit", BLUE, "#1565C0",
+        "10–25x ARR",
+        r * 10, r * 17, r * 25,
+        "#1565C0",
+        "Arab National Bank and AlJazira Capital are existing investors. GCC banks pay strategic premiums for licensed "
+        "workforce banking platforms given Vision 2030 workforce digitisation mandate. "
+        "KSA SAMA license (expected Q2 2026) is the key valuation trigger.",
+    )
+    _val_row(
+        "Strategic Sale to Global HCM Platform",
+        "Possible", "#D4D5CE", BLACK,
+        "8–18x ARR",
+        r * 8, r * 13, r * 18,
+        BLACK,
+        "ADP, Workday and SAP SuccessFactors are all acquiring EWA capabilities. Khazna's Mudad partnership "
+        "(750K employee pipeline) and MENA payroll infrastructure make it a relevant bolt-on. "
+        "DailyPay valued at $1.75B on $235M revenue (~7x) sets the ceiling for mature EWA platforms.",
+    )
+    _val_row(
+        "Remain Independent — Quona Pursues Secondaries",
+        "Unattractive near-term", "#D4D5CE", BLACK,
+        "8–15x ARR",
+        r * 8, r * 11, r * 15,
+        BLACK,
+        "Secondary at modest ARR multiple ahead of KSA scale-up. "
+        "MNT-Halan ($1B+ valuation at ~3x revenue) is the ceiling for what Egypt-origin digital banking can achieve "
+        "— Khazna is significantly earlier stage.",
+    )
+
+    st.markdown(
+        f"<div style='background:{BG};border-radius:8px;padding:12px 16px;"
+        f"font-size:11px;color:{MUTED};margin-top:8px'>"
+        f"Valuation ranges are indicative and based on ARR multiples given Khazna's early revenue stage. "
+        f"Primary comps: Payfare–Fiserv ($147M acquisition, ~0.6x revenue on $235M run-rate, 2024), "
+        f"DailyPay ($1.75B valuation, ~7x revenue, 2024), MNT-Halan ($1B+ valuation, ~3x revenue, Egypt digital bank). "
+        f"Wagestream existing stake is the single most important signal in the acquirer universe. "
+        f"KSA SAMA license and Mudad pipeline (750K employees) are the key value inflection points."
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 3: Acquirer Universe ─────────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 12px 0;letter-spacing:.3px'>Acquirer Universe — Prioritized</div>",
+        unsafe_allow_html=True,
+    )
+
+    FIT_COLORS = {
+        "Very High":  ("#D5FA94", "#2C2C2A"),
+        "High":       ("#C5E5FF", "#1565C0"),
+        "Medium":     ("#D4D5CE", "#2C2C2A"),
+        "Low-Medium": ("#FFCDD2", "#B71C1C"),
+        "Low":        ("#FFCDD2", "#B71C1C"),
+    }
+
+    def _fit_badge(fit):
+        bg, fg = FIT_COLORS.get(fit, ("#D4D5CE", "#2C2C2A"))
+        return (
+            f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:600;"
+            f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>"
+        )
+
+    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0):
+        row_bg = "#EFF0EA" if row_idx % 2 == 0 else "#FFFFFF"
+        with st.container():
+            st.markdown(
+                f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
+                unsafe_allow_html=True,
+            )
+            cols = st.columns([2, 2, 3, 1, 2])
+            with cols[0]:
+                st.markdown(
+                    f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"{_fit_badge(fit)}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[1]:
+                st.markdown(
+                    f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{activity}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[2]:
+                st.markdown(
+                    f"<div style='font-size:13px;color:#2C2C2A;padding-top:6px'>{rationale}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[3]:
+                st.checkbox("", key=key)
+            with cols[4]:
+                if affinity_cache is None:
+                    st.markdown(
+                        f"<div style='font-size:11px;color:{MUTED};padding-top:8px'>Sync Affinity above</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    note = affinity_cache.get(name)
+                    if note is None:
+                        st.markdown(
+                            f"<div style='font-size:11px;color:{MUTED};font-style:italic;padding-top:8px'>Not in Affinity</div>",
+                            unsafe_allow_html=True,
+                        )
+                    elif note.get("stale"):
+                        st.markdown(
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            unsafe_allow_html=True,
+                        )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    local_buyers = [
+        ("Arab National Bank", "Very High",
+         "Existing Khazna investor; Saudi bank actively scaling digital workforce and payroll banking products",
+         "Natural path from investor to acquirer — already has deep knowledge of Khazna's business and KSA expansion plans"),
+        ("AlJazira Capital", "Very High",
+         "Existing Khazna investor; Saudi capital markets and banking group",
+         "Existing investor relationship positions AlJazira as a credible bridge to a broader Saudi bank acquisition or IPO process"),
+        ("First Abu Dhabi Bank (FAB)", "High",
+         "UAE's largest bank; actively acquiring fintech capabilities across MENA workforce and payroll banking",
+         "Khazna's Egypt and KSA digital workforce banking platform would extend FAB's payroll banking franchise across two of MENA's largest labour markets"),
+        ("Fawry", "Medium",
+         "Egypt's largest listed fintech; launched Fawry Business with SME payroll and workforce payment products in 2025",
+         "Khazna's payroll-backed lending and EWA capabilities would accelerate Fawry's workforce finance expansion"),
+        ("Commercial International Bank (CIB)", "Medium",
+         "Egypt's largest private bank; actively digitising SME and corporate payroll services",
+         "Khazna's digital workforce banking platform would give CIB instant payroll-backed lending distribution across Egypt's formal sector"),
+    ]
+
+    global_buyers = [
+        ("Wagestream", "Very High",
+         "Already holds equity stake in Khazna; raised £300M debt facility in 2025; built global EWA portfolio including Refyne (India) and GajiGesa (Indonesia)",
+         "Most likely acquirer — existing shareholder with strategic intent to consolidate EM EWA platforms into a global workforce banking group"),
+        ("ADP", "High",
+         "Partnered with Payfare for EWA in Canada (2024); integrating EWA into ADP's HCM platform globally; 1M+ employer relationships",
+         "Khazna's MENA payroll and EWA infrastructure would extend ADP's workforce banking capabilities into Egypt and KSA — two underserved high-growth markets"),
+        ("Workday", "High",
+         "Partnered with DailyPay for EWA integration into Workday platform; expanding HCM coverage across MENA enterprise clients",
+         "Khazna's Mudad partnership and KSA payroll infrastructure would give Workday a turnkey EWA solution for its growing Saudi enterprise client base"),
+        ("Fiserv", "Medium",
+         "Acquired Payfare for $147M (Dec 2024) — directly comparable EWA and digital banking platform",
+         "Fiserv is actively building a global EWA portfolio post-Payfare; Khazna is the logical MENA addition to complement its gig economy workforce banking expansion"),
+        ("Network International", "Medium",
+         "Pan-Africa and MENA payments infrastructure; deepening Egypt and KSA fintech relationships post-acquisition by Brookfield",
+         "Khazna's workforce banking and payroll-linked payments would complement Network International's merchant and corporate payments stack in MENA"),
+    ]
+
+    secondaries_buyers = [
+        ("IFC", "Very High",
+         "Active pan-MENA fintech investor; has been circling Khazna for several years; co-led MNT-Halan Series E (2024)",
+         "IFC's financial inclusion mandate aligns directly with Khazna's unbanked workforce mission — DFI financing or secondary stake ahead of KSA scale-up"),
+        ("Apis Partners", "High",
+         "Led MNT-Halan Series E (2024); specialist financial services growth investor across Africa and MENA",
+         "Apis has deep conviction in Egypt digital banking — Khazna is the natural complement to MNT-Halan in their MENA portfolio"),
+        ("Partech", "Medium",
+         "Closed €280M second Africa fund 2024; active MENA fintech investor",
+         "Khazna at $9.4M ARR with clear KSA scale-up path fits Partech's growth-stage thesis"),
+    ]
+
+    affinity_cache = st.session_state.get("khazna_affinity_data")
+    _, _sync_btn_col = st.columns([6, 1])
+    with _sync_btn_col:
+        if st.button("Sync Affinity", key="khazna_affinity_sync"):
+            _api_key  = st.secrets.get("AFFINITY_API_KEY", "")
+            all_names = list(dict.fromkeys(
+                [b[0] for b in local_buyers]
+                + [g[0] for g in global_buyers]
+                + [s[0] for s in secondaries_buyers]
+            ))
+            with st.spinner("Fetching Affinity data for all buyers…"):
+                st.session_state["khazna_affinity_data"] = {
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    for bname in all_names
+                }
+            st.rerun()
+
+    _HDR_STYLE = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px;padding-bottom:4px"
+    )
+
+    def _header_row():
+        hcols  = st.columns([2, 2, 3, 1, 2])
+        labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage Q3?", "Last Affinity Contact"]
+        for hc, lbl in zip(hcols, labels):
+            with hc:
+                st.markdown(f"<div style='{_HDR_STYLE}'>{lbl}</div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:2px;background:#EFF0EA;margin-bottom:8px'></div>", unsafe_allow_html=True)
+
+    tab_local, tab_global, tab_sec = st.tabs(["Local Buyers", "Global Buyers", "Secondaries Buyers"])
+    with tab_local:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(local_buyers):
+            key = "engage_khazna_" + name.replace(" ", "").replace("/", "").replace("(", "").replace(")", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+    with tab_global:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(global_buyers):
+            key = "engage_khazna_" + name.replace(" ", "").replace("/", "").replace("(", "").replace(")", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+    with tab_sec:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(secondaries_buyers):
+            key = "engage_khazna_sec_" + name.replace(" ", "").replace("/", "").replace("(", "").replace(")", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+
 # ── Exit Tracking tab ─────────────────────────────────────────────────────────
 
 def render_exit_tab(info: pd.Series, company_id: int) -> None:
@@ -5312,6 +5749,11 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
     # ── MaxSoko custom exit tab ────────────────────────────────────────────────
     if company_name == "MaxSoko":
         _render_maxsoko_exit_tab()
+        return
+
+    # ── Khazna custom exit tab ─────────────────────────────────────────────────
+    if company_name == "Khazna":
+        _render_khazna_exit_tab()
         return
 
     LIKELIHOOD_OPTS = ["Exploratory", "Active", "Advanced", "On Hold"]
