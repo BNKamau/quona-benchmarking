@@ -11,15 +11,18 @@ Setup instructions
 4. APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID
    - Application type: Web application
    - Name: Quona Benchmarking
-   - Authorised redirect URIs:
-       https://your-app.streamlit.app      ← Streamlit Cloud (exact URL, no trailing slash)
-       http://localhost:8501               ← local dev
+   - Authorised redirect URIs — BASE URL ONLY, no path suffix:
+       https://quona-benchmarking-kcstcmzvzhmrchxoael49m.streamlit.app   ← Streamlit Cloud
+       http://localhost:8501                                              ← local dev
+   ⚠  Streamlit does not support custom URL routes. Do NOT append /oauth2callback
+      or any path. Google redirects back to the base URL with ?code=… as a query
+      parameter, which Streamlit reads via st.query_params.
 5. Copy the Client ID and Client Secret into Streamlit Cloud app secrets
    (or .streamlit/secrets.toml locally — see secrets.toml.example):
        GOOGLE_CLIENT_ID     = "….apps.googleusercontent.com"
        GOOGLE_CLIENT_SECRET = "GOCSPX-…"
        ALLOWED_DOMAIN       = "quona.com"
-       REDIRECT_URI         = "https://your-app.streamlit.app"   ← must exactly match step 4
+       REDIRECT_URI         = "https://quona-benchmarking-kcstcmzvzhmrchxoael49m.streamlit.app"
 
 Session persistence
 ───────────────────
@@ -56,13 +59,33 @@ _WARN_BG = "#FFF3E0"
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 def _cfg() -> dict:
+    raw_redirect = st.secrets.get(
+        "REDIRECT_URI",
+        "http://localhost:8501",
+    )
+
+    # Strip any path suffix — Streamlit has no routing, so only the base URL
+    # is valid. A common mistake is appending /oauth2callback which causes a
+    # 403 from Google (redirect_uri_mismatch). Strip it here defensively.
+    parsed = urllib.parse.urlparse(raw_redirect)
+    if parsed.path and parsed.path.rstrip("/"):
+        stripped = urllib.parse.urlunparse(parsed._replace(path="", query="", fragment=""))
+        print(
+            f"[auth] WARNING — REDIRECT_URI had a path component "
+            f"('{parsed.path}') which is invalid for Streamlit. "
+            f"Stripped to: {stripped}"
+        )
+        redirect_uri = stripped
+    else:
+        redirect_uri = raw_redirect.rstrip("/")
+
     cfg = {
         "client_id":      st.secrets.get("GOOGLE_CLIENT_ID", ""),
         "client_secret":  st.secrets.get("GOOGLE_CLIENT_SECRET", ""),
-        "redirect_uri":   st.secrets.get("REDIRECT_URI", "http://localhost:8501"),
+        "redirect_uri":   redirect_uri,
         "allowed_domain": st.secrets.get("ALLOWED_DOMAIN", "quona.com"),
     }
-    # Log config status on every call so it appears in Streamlit Cloud logs
+    # Log config status so it appears in Streamlit Cloud logs
     print(
         f"[auth] config — "
         f"client_id={'SET (' + cfg['client_id'][:12] + '...)' if cfg['client_id'] else 'NOT SET'} | "
@@ -347,11 +370,26 @@ def _render_login_ui() -> None:
         # Shows the exact values being sent to Google so you can verify them
         # against the Google Cloud Console registration. Remove once working.
         with st.expander("🔧 OAuth debug — expand if sign-in fails"):
-            client_id_ok  = bool(cfg["client_id"])
-            secret_ok     = bool(cfg["client_secret"])
-            id_preview    = (cfg["client_id"][:20] + "…") if client_id_ok else "NOT SET"
-            id_colour     = "#2E7D32" if client_id_ok else _WARN
-            sec_colour    = "#2E7D32" if secret_ok    else _WARN
+            client_id_ok = bool(cfg["client_id"])
+            secret_ok    = bool(cfg["client_secret"])
+            id_preview   = (cfg["client_id"][:20] + "…") if client_id_ok else "NOT SET"
+            id_colour    = "#2E7D32" if client_id_ok else _WARN
+            sec_colour   = "#2E7D32" if secret_ok    else _WARN
+
+            # Warn if the configured redirect_uri (before stripping) had a path
+            raw_redirect = st.secrets.get("REDIRECT_URI", "")
+            raw_parsed   = urllib.parse.urlparse(raw_redirect)
+            has_bad_path = bool(raw_parsed.path and raw_parsed.path.rstrip("/"))
+            path_warning = (
+                f"<div style='background:{_WARN_BG};border:1px solid {_WARN};"
+                f"border-radius:6px;padding:8px 10px;margin:6px 0;"
+                f"font-size:12px;color:{_WARN}'>"
+                f"⚠ REDIRECT_URI secret contains a path "
+                f"(<code>{raw_parsed.path}</code>) — Streamlit has no URL routing, "
+                f"so this causes a 403. The path has been stripped automatically. "
+                f"Remove it from your Streamlit Cloud secret too.</div>"
+                if has_bad_path else ""
+            )
 
             st.markdown(
                 f"<div style='font-size:12px;line-height:2;font-family:monospace'>"
@@ -363,8 +401,11 @@ def _render_login_ui() -> None:
                 f"<code style='background:#F5F5F5;padding:4px 8px;border-radius:4px;"
                 f"display:block;margin:4px 0;font-size:13px;color:{_BLACK}'>"
                 f"{cfg['redirect_uri']}</code>"
-                f"<b style='color:{_WARN}'>↑ This must exactly match an Authorised Redirect URI<br>"
-                f"in Google Cloud Console → Credentials → your OAuth 2.0 Client.</b>"
+                f"{path_warning}"
+                f"<span style='color:{_MUTED};font-size:11px'>"
+                f"↑ Must exactly match an Authorised Redirect URI in<br>"
+                f"Google Cloud Console → Credentials → your OAuth 2.0 Client ID.<br>"
+                f"Base URL only — no /oauth2callback or any path suffix.</span>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
