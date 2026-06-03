@@ -1145,116 +1145,423 @@ def render_benchmarking_tab(
                 unsafe_allow_html=True,
             )
         elif company_name == "Khazna":
-            # ── Disclaimer ────────────────────────────────────────────────────
+            # Hardcoded EWA comp medians — Payfare is only listed pure-play EWA
+            _KH_GM_MED    = 26.0   # Payfare gross margin %
+            _KH_EM_MED    = 15.0   # Payfare EBITDA margin %
+            _KH_REV_SCALE = 235.0  # Payfare / DailyPay revenue at exit (USD M)
+            _KH_N_COMPS   = 4      # Payfare, DailyPay, MNT-Halan, Wagestream
+
             st.markdown(
                 f"<div style='background:{WARN_BG};border:1px solid {WARN};border-radius:8px;"
                 f"padding:10px 14px;font-size:12px;color:{WARN};margin-bottom:16px'>"
                 f"<b>Note:</b> Comp set is limited given Khazna's unique positioning as an Egypt/KSA digital "
-                f"workforce bank. Payfare is the only publicly listed pure-play EWA comp. MNT-Halan is the "
-                f"closest Egypt digital banking comp. Data points will improve as more comps are added to "
-                f"the exit database.</div>",
+                f"workforce bank. Payfare is the only publicly listed pure-play EWA comp. Comp medians are based "
+                f"on {_KH_N_COMPS} reference points and should be treated as directional benchmarks only.</div>",
                 unsafe_allow_html=True,
             )
-            # ── Live Khazna data ───────────────────────────────────────────────
-            _kh_rev = ltm_val
-            _kh_gm  = ltm_gm_pct
-            _kh_em  = ltm_em_pct
-            _kh_ac  = None
-            if not kpis.empty and "active_clients_count" in kpis.columns:
-                _ac_s = kpis["active_clients_count"].dropna()
-                if not _ac_s.empty:
-                    _kh_ac = float(_ac_s.iloc[-1])
-            # ── Normalisers (0–100 scale) ──────────────────────────────────────
-            _REV_MAX = 300e6; _GM_MAX = 30.0; _EM_MIN, _EM_MAX = -20.0, 20.0; _USR_MAX = 7e6
-            def _nr(v): return None if v is None else min(float(v) / _REV_MAX * 100, 100)
-            def _ng(v): return None if v is None else min(max(float(v) / _GM_MAX * 100, 0), 100)
-            def _ne(v): return None if v is None else min(max((float(v) - _EM_MIN) / (_EM_MAX - _EM_MIN) * 100, 0), 100)
-            def _nu(v): return None if (v is None or float(v) <= 0) else min(math.log10(float(v) + 1) / math.log10(_USR_MAX + 1) * 100, 100)
-            _cats = ["Revenue", "Gross Margin", "EBITDA Margin", "Active Users"]
-            _traces = [
-                ("Khazna",              [_nr(_kh_rev), _ng(_kh_gm), _ne(_kh_em), _nu(_kh_ac)], BLACK,    "rgba(213,250,148,0.35)", "solid", 2.5, True),
-                ("Payfare",             [_nr(235e6),   _ng(26.0),   _ne(15.0),   _nu(1.5e6)],  "#1565C0", "rgba(197,229,255,0.20)", "dot",   1.5, False),
-                ("DailyPay (partial)",  [_nr(235e6),   None,        None,        _nu(6e6)],     "#E65100", "rgba(0,0,0,0)",          "dot",   1.5, False),
-                ("MNT-Halan (partial)", [_nr(300e6),   None,        None,        _nu(7e6)],     "#6A1B9A", "rgba(0,0,0,0)",          "dot",   1.5, False),
-            ]
-            fig_kh = go.Figure()
-            for _tn, _tv, _tc, _tf, _td, _tw, _tfill in _traces:
-                fig_kh.add_trace(go.Scatterpolar(
-                    r=_tv + [_tv[0]], theta=_cats + [_cats[0]],
-                    fill="toself" if _tfill else "none", fillcolor=_tf,
-                    line=dict(color=_tc, width=_tw, dash=_td), name=_tn,
-                    connectgaps=False,
-                    hovertemplate="%{theta}: %{r:.0f}/100<extra>" + _tn + "</extra>",
-                ))
-            fig_kh.update_layout(
-                polar=dict(
-                    bgcolor=WHITE,
-                    radialaxis=dict(visible=False, range=[0, 100]),
-                    angularaxis=dict(tickfont=dict(size=11, color=BLACK), linecolor=BORDER, gridcolor=BORDER),
-                ),
-                showlegend=True,
-                legend=dict(
-                    font=dict(size=11, color=BLACK), bgcolor=WHITE, bordercolor=BORDER, borderwidth=1,
-                    orientation="h", yanchor="bottom", y=-0.20, xanchor="center", x=0.5,
-                ),
-                paper_bgcolor=BG, margin=dict(l=30, r=30, t=20, b=70), height=420,
-            )
-            st.markdown(
-                f"<div style='font-size:13px;font-weight:500;color:{MUTED};margin:0 0 4px 0'>"
-                f"EWA and Digital Workforce Banking — Benchmarking (Indexed 0–100)</div>",
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f"<div style='font-size:11px;color:{MUTED};margin-bottom:12px'>"
-                f"Dotted lines indicate partial data — gaps where values are not disclosed. "
-                f"Revenue indexed to $300M. Active Users on log scale (max 7M). EBITDA Margin range −20% to +20%.</div>",
-                unsafe_allow_html=True,
-            )
-            st.plotly_chart(fig_kh, use_container_width=True, config={"displayModeBar": False})
-            # ── Metrics comparison table ───────────────────────────────────────
-            st.markdown(
-                f"<div style='font-size:13px;font-weight:500;color:{MUTED};margin:20px 0 10px;letter-spacing:.3px'>"
-                f"Metrics Comparison</div>",
-                unsafe_allow_html=True,
-            )
-            _tc_w = "1.4fr 1fr 0.9fr 0.9fr 1fr"
-            _tc_h = ["Metric", "Khazna (live)", "Payfare", "DailyPay", "MNT-Halan"]
-            _tc_hs = f"font-size:10px;font-weight:700;color:#93A3A1;text-transform:uppercase;letter-spacing:.5px;padding:8px 12px"
-            _tc_head = (
-                f"<div style='display:grid;grid-template-columns:{_tc_w};border-bottom:1px solid {BORDER};margin-bottom:4px'>"
-                + "".join(f"<div style='{_tc_hs}'>{h}</div>" for h in _tc_h)
-                + "</div>"
-            )
-            _tc_rows_data = [
-                ("Revenue",                      fmt_usd(_kh_rev) if _kh_rev else "No data uploaded", "$235M",  "$235M",   "$300M+"),
-                ("Gross Margin %",               fmt_pct(_kh_gm) if _kh_gm is not None else "N/A",    "26%",    "N/A",     "N/A"),
-                ("EBITDA Margin %",              fmt_pct(_kh_em) if _kh_em is not None else "N/A",    "~15%",   "N/A",     "Profitable"),
-                ("Active Users / Workers",       fmt_int(_kh_ac) if _kh_ac else "N/A",                "1.5M",   "6M",      "7M"),
-                ("Revenue Multiple at Exit",     "N/A",                                                "~0.6x",  "~7x",     "~3x"),
-            ]
-            _tc_rows_html = ""
-            for _i, (_m, _kh, _pf, _dp, _mh) in enumerate(_tc_rows_data):
-                _bg2 = "#F7F8F5" if _i % 2 == 0 else "#FFFFFF"
-                _cc = f"font-size:12px;color:{MUTED};padding:9px 12px"
-                _tc_rows_html += (
-                    f"<div style='display:grid;grid-template-columns:{_tc_w};background:{_bg2};border-radius:4px'>"
-                    f"<div style='font-size:12px;font-weight:600;color:{BLACK};padding:9px 12px'>{_m}</div>"
-                    f"<div style='font-size:13px;font-weight:700;color:{BLACK};padding:9px 12px'>{_kh}</div>"
-                    f"<div style='{_cc}'>{_pf}</div>"
-                    f"<div style='{_cc}'>{_dp}</div>"
-                    f"<div style='{_cc}'>{_mh}</div>"
+
+            # ── Live data from DB ──────────────────────────────────────────────
+            _kh_rev    = ltm_val
+            _kh_gm     = ltm_gm_pct
+            _kh_em     = ltm_em_pct
+            _kh_ac     = None
+            _kh_arr    = None
+            _kh_rev_m  = _kh_rev / 1e6 if _kh_rev else None
+            _kh_hist   = 0
+            _kh_rev_lt = None
+            if not kpis.empty:
+                if "active_clients_count" in kpis.columns:
+                    _ac_s = kpis["active_clients_count"].dropna()
+                    if not _ac_s.empty:
+                        _kh_ac = float(_ac_s.iloc[-1])
+                if "arr_usd" in kpis.columns:
+                    _arr_s = kpis["arr_usd"].dropna()
+                    if not _arr_s.empty:
+                        _kh_arr = float(_arr_s.iloc[-1])
+                if "revenue_usd" in kpis.columns:
+                    _rv_s = kpis["revenue_usd"].dropna()
+                    if not _rv_s.empty:
+                        _kh_rev_lt = float(_rv_s.iloc[-1])
+                        _kh_hist   = len(_rv_s)
+
+            # ── Section 1: Summary stat cards ─────────────────────────────────
+            def _kh_arrow(co_val, med_val, suffix="pp"):
+                if co_val is None or med_val is None:
+                    return f"<div style='font-size:12px;color:{MUTED};margin-top:5px'>Portfolio: —</div>"
+                delta = float(co_val) - float(med_val)
+                arrow = "↑" if delta > 0 else ("↓" if delta < 0 else "→")
+                clr   = "#2E7D32" if delta > 0 else ("#C62828" if delta < 0 else MUTED)
+                sign  = "+" if delta > 0 else ""
+                return (
+                    f"<div style='font-size:12px;color:{clr};font-weight:600;margin-top:5px'>"
+                    f"{arrow}&nbsp;{fmt_pct(co_val)}"
+                    f"&nbsp;<span style='font-weight:400;color:{MUTED}'>({sign}{delta:.1f}{suffix} vs median)</span>"
                     f"</div>"
                 )
-            st.markdown(
-                f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;padding:14px 4px;overflow:hidden'>"
-                + _tc_head + _tc_rows_html + "</div>",
-                unsafe_allow_html=True,
+
+            def _kh_card(label, value_str, sub_html=""):
+                return (
+                    f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
+                    f"padding:18px 20px'>"
+                    f"<div style='font-size:10px;text-transform:uppercase;letter-spacing:.6px;"
+                    f"color:{MUTED};font-weight:600;margin-bottom:6px'>{label}</div>"
+                    f"<div style='font-size:24px;font-weight:700;color:{BLACK}'>{value_str}</div>"
+                    f"{sub_html}</div>"
+                )
+
+            _pct_scale = (
+                f"<div style='font-size:12px;color:#6A1B9A;font-weight:600;margin-top:5px'>"
+                f"{(_kh_rev_m / _KH_REV_SCALE * 100):.0f}% of comp exit scale</div>"
+                if _kh_rev_m else
+                f"<div style='font-size:12px;color:{MUTED};margin-top:5px'>No data uploaded</div>"
             )
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.markdown(
+                    _kh_card(
+                        "LTM Revenue",
+                        fmt_usd(_kh_rev) if _kh_rev else "—",
+                        f"<div style='font-size:12px;color:{MUTED};margin-top:5px'>"
+                        f"Comp exit scale: ${_KH_REV_SCALE:.0f}M</div>",
+                    ),
+                    unsafe_allow_html=True,
+                )
+            with c2:
+                st.markdown(
+                    _kh_card(f"Comp Exit Scale", f"${_KH_REV_SCALE:.0f}M", _pct_scale),
+                    unsafe_allow_html=True,
+                )
+            with c3:
+                st.markdown(
+                    _kh_card(
+                        "LTM Gross Margin",
+                        fmt_pct(_kh_gm) if _kh_gm is not None else "—",
+                        _kh_arrow(_kh_gm, _KH_GM_MED),
+                    ),
+                    unsafe_allow_html=True,
+                )
+            with c4:
+                st.markdown(
+                    _kh_card(
+                        "LTM EBITDA Margin",
+                        fmt_pct(_kh_em) if _kh_em is not None else "—",
+                        _kh_arrow(_kh_em, _KH_EM_MED),
+                    ),
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+            c5, c6, c7, c8 = st.columns(4)
+            with c5:
+                st.markdown(
+                    _kh_card(
+                        "Active Users",
+                        fmt_int(_kh_ac) if _kh_ac else "—",
+                        f"<div style='font-size:12px;color:{MUTED};margin-top:5px'>Workers / borrowers</div>",
+                    ),
+                    unsafe_allow_html=True,
+                )
+            with c6:
+                st.markdown(
+                    _kh_card(
+                        "Revenue (Latest Period)",
+                        fmt_usd(_kh_rev_lt) if _kh_rev_lt else "—",
+                        f"<div style='font-size:12px;color:{MUTED};margin-top:5px'>Most recent filing period</div>",
+                    ),
+                    unsafe_allow_html=True,
+                )
+            with c7:
+                st.markdown(
+                    _kh_card(
+                        "ARR",
+                        fmt_usd(_kh_arr) if _kh_arr else "—",
+                        f"<div style='font-size:12px;color:{MUTED};margin-top:5px'>Annualised run-rate</div>",
+                    ),
+                    unsafe_allow_html=True,
+                )
+            with c8:
+                st.markdown(
+                    _kh_card(
+                        "History",
+                        f"{_kh_hist} periods",
+                        f"<div style='font-size:12px;color:{MUTED};margin-top:5px'>"
+                        f"{_KH_N_COMPS} comps in set</div>",
+                    ),
+                    unsafe_allow_html=True,
+                )
+
             st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+            # ── Section 2: Gap analysis (left) + Radar chart (right) ──────────
+            _KH_STATUS = {
+                "ahead":   ("#2E7D32", GREEN,     "#E8F5E9", "AHEAD"),
+                "behind":  (WARN,      WARN_BG,   WARN_BG,   "BEHIND"),
+                "no_data": (MUTED,     "#F5F5F5", "#F5F5F5", "NO DATA"),
+                "scale":   ("#6A1B9A", "#F3E5F5", "#F3E5F5", "SCALE"),
+            }
+
+            def _kh_bar(label, co_val, med_val, co_str, med_str, delta_str, bar_pct, status, note="Comp median"):
+                bc, _, bb, bt = _KH_STATUS[status]
+                return (
+                    f"<div style='border-left:4px solid {bc};background:{WHITE};"
+                    f"border-radius:0 10px 10px 0;padding:14px 16px;margin-bottom:12px;"
+                    f"box-shadow:0 1px 3px rgba(0,0,0,.04)'>"
+                    f"<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:8px'>"
+                    f"<span style='font-size:10px;text-transform:uppercase;letter-spacing:.5px;"
+                    f"color:{MUTED};font-weight:600'>{label}</span>"
+                    f"<span style='background:{bb};color:{bc};border-radius:4px;"
+                    f"padding:2px 8px;font-size:10px;font-weight:700'>{bt}</span>"
+                    f"</div>"
+                    f"<div style='display:flex;align-items:baseline;gap:8px;margin-bottom:10px;flex-wrap:wrap'>"
+                    f"<span style='font-size:20px;font-weight:700;color:{BLACK}'>{co_str}</span>"
+                    f"<span style='font-size:12px;color:{MUTED}'>vs {med_str} median</span>"
+                    f"<span style='font-size:12px;color:{bc};font-weight:600'>{delta_str}</span>"
+                    f"</div>"
+                    f"<div style='background:{BG};border-radius:4px;height:6px;overflow:hidden'>"
+                    f"<div style='background:{bc};height:6px;width:{bar_pct:.0f}%;border-radius:4px'></div>"
+                    f"</div>"
+                    f"<div style='display:flex;justify-content:space-between;margin-top:3px'>"
+                    f"<span style='font-size:10px;color:{MUTED}'>0</span>"
+                    f"<span style='font-size:10px;color:{MUTED}'>{note}</span>"
+                    f"</div></div>"
+                )
+
+            col_left, col_right = st.columns(2, gap="large")
+
+            with col_left:
+                st.markdown(
+                    f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
+                    f"color:{MUTED};font-weight:600;margin-bottom:12px'>Performance vs. Comp Medians</div>",
+                    unsafe_allow_html=True,
+                )
+
+                # Gross Margin bar
+                if _kh_gm is not None:
+                    _ref_gm = max(abs(_KH_GM_MED), abs(_kh_gm), 1.0)
+                    _gm_bar = min(max((_kh_gm + _ref_gm) / (_ref_gm * 2) * 100, 0), 100)
+                    _gm_delta = _kh_gm - _KH_GM_MED
+                    _gm_ds    = (f"+{_gm_delta:.1f}pp" if _gm_delta >= 0 else f"{_gm_delta:.1f}pp")
+                    _gm_stat  = "ahead" if _gm_delta >= 0 else "behind"
+                else:
+                    _gm_bar, _gm_ds, _gm_stat = 0.0, "—", "no_data"
+                st.markdown(
+                    _kh_bar("Gross Margin",
+                            _kh_gm, _KH_GM_MED,
+                            fmt_pct(_kh_gm) if _kh_gm is not None else "—",
+                            fmt_pct(_KH_GM_MED),
+                            _gm_ds, _gm_bar, _gm_stat,
+                            "Payfare benchmark"),
+                    unsafe_allow_html=True,
+                )
+
+                # EBITDA Margin bar
+                if _kh_em is not None:
+                    _ref_em = max(abs(_KH_EM_MED), abs(_kh_em), 1.0)
+                    _em_bar = min(max((_kh_em + _ref_em) / (_ref_em * 2) * 100, 0), 100)
+                    _em_delta = _kh_em - _KH_EM_MED
+                    _em_ds    = (f"+{_em_delta:.1f}pp" if _em_delta >= 0 else f"{_em_delta:.1f}pp")
+                    _em_stat  = "ahead" if _em_delta >= 0 else "behind"
+                else:
+                    _em_bar, _em_ds, _em_stat = 0.0, "—", "no_data"
+                st.markdown(
+                    _kh_bar("EBITDA Margin",
+                            _kh_em, _KH_EM_MED,
+                            fmt_pct(_kh_em) if _kh_em is not None else "—",
+                            fmt_pct(_KH_EM_MED),
+                            _em_ds, _em_bar, _em_stat,
+                            "Payfare benchmark"),
+                    unsafe_allow_html=True,
+                )
+
+                # Revenue vs exit scale bar
+                if _kh_rev_m is not None:
+                    _rv_pct  = min(_kh_rev_m / _KH_REV_SCALE * 100, 100)
+                    _rv_ds   = f"{_rv_pct:.0f}% of comp exit scale"
+                    _rv_stat = "scale"
+                else:
+                    _rv_pct, _rv_ds, _rv_stat = 0.0, "—", "no_data"
+                st.markdown(
+                    _kh_bar("Revenue vs Exit Scale",
+                            _kh_rev_m, _KH_REV_SCALE,
+                            f"${_kh_rev_m:.1f}M" if _kh_rev_m is not None else "—",
+                            f"${_KH_REV_SCALE:.0f}M",
+                            _rv_ds, _rv_pct, _rv_stat,
+                            f"Comp median exit (${_KH_REV_SCALE:.0f}M)"),
+                    unsafe_allow_html=True,
+                )
+
+            with col_right:
+                # ── Radar chart — Khazna vs comp median ───────────────────────
+                def _kh_norm(val, lo, hi):
+                    if val is None:
+                        return 0.0
+                    return max(0.0, min(100.0, (float(val) - lo) / (hi - lo) * 100))
+
+                _kh_gm_r  = _kh_norm(_kh_gm,  0,   80)
+                _kh_em_r  = _kh_norm(_kh_em,  -20,  30)
+                _kh_rev_r = min((_kh_rev_m / _KH_REV_SCALE * 100) if _kh_rev_m else 0.0, 100.0)
+                _kh_ac_r  = (
+                    min(math.log10(float(_kh_ac) + 1) / math.log10(7e6 + 1) * 100, 100.0)
+                    if (_kh_ac and float(_kh_ac) > 0) else 0.0
+                )
+                _md_gm_r  = _kh_norm(_KH_GM_MED, 0,   80)
+                _md_em_r  = _kh_norm(_KH_EM_MED, -20,  30)
+                _md_rev_r = 100.0
+                _md_ac_r  = 70.0
+
+                _kh_cats = ["Gross Margin", "EBITDA Margin", "Revenue Scale", "Active Users"]
+                _kh_co_v = [_kh_gm_r, _kh_em_r, _kh_rev_r, _kh_ac_r]
+                _kh_md_v = [_md_gm_r, _md_em_r, _md_rev_r, _md_ac_r]
+
+                fig_kh = go.Figure()
+                fig_kh.add_trace(go.Scatterpolar(
+                    r=_kh_co_v + [_kh_co_v[0]], theta=_kh_cats + [_kh_cats[0]],
+                    fill="toself", fillcolor="rgba(213,250,148,0.30)",
+                    line=dict(color=BLACK, width=2), name="Khazna",
+                    hovertemplate="%{theta}: %{r:.0f}/100<extra></extra>",
+                ))
+                fig_kh.add_trace(go.Scatterpolar(
+                    r=_kh_md_v + [_kh_md_v[0]], theta=_kh_cats + [_kh_cats[0]],
+                    fill="toself", fillcolor="rgba(197,229,255,0.30)",
+                    line=dict(color="#1565C0", width=2, dash="dot"), name="Comp Median",
+                    hovertemplate="%{theta}: %{r:.0f}/100<extra></extra>",
+                ))
+                fig_kh.update_layout(
+                    polar=dict(
+                        bgcolor=WHITE,
+                        radialaxis=dict(visible=False, range=[0, 100]),
+                        angularaxis=dict(tickfont=dict(size=11, color=BLACK), linecolor=BORDER, gridcolor=BORDER),
+                    ),
+                    showlegend=True,
+                    legend=dict(
+                        font=dict(size=11, color=BLACK), bgcolor=WHITE,
+                        bordercolor=BORDER, borderwidth=1,
+                        orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5,
+                    ),
+                    paper_bgcolor=BG, margin=dict(l=30, r=30, t=20, b=50), height=380,
+                )
+                st.plotly_chart(fig_kh, use_container_width=True, config={"displayModeBar": False})
+
+            # ── Section 3: Implied exit value (ARR multiple slider) ────────────
+            _arr_base = _kh_arr if _kh_arr else _kh_rev
+            _arr_lbl  = "ARR" if _kh_arr else "LTM Revenue"
+
+            if _arr_base is not None:
+                _scale_pct   = min((_kh_rev_m / _KH_REV_SCALE * 100) if _kh_rev_m else 0.0, 100.0)
+                _marker_left = max(5.0, min(_scale_pct, 95.0))
+
+                _kh_multiple = st.slider(
+                    "ARR Multiple (10–15x)",
+                    min_value=10.0, max_value=15.0, value=12.0, step=0.5,
+                    key="khazna_arr_slider", format="%.1fx",
+                )
+                _implied_ev = _arr_base * _kh_multiple
+
+                st.markdown(
+                    f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
+                    f"padding:24px 28px;margin-bottom:20px'>"
+                    f"<div style='display:flex;justify-content:space-between;align-items:flex-start;"
+                    f"flex-wrap:wrap;gap:8px;margin-bottom:14px'>"
+                    f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
+                    f"color:{MUTED};font-weight:600'>Implied Exit Value</div>"
+                    f"<div style='background:{BG};border-radius:4px;padding:3px 10px;"
+                    f"font-size:11px;font-weight:600;color:{BLACK}'>{_kh_multiple:.1f}x ARR</div>"
+                    f"</div>"
+                    f"<div style='display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:20px'>"
+                    f"<span style='font-size:36px;font-weight:700;color:{BLACK}'>{fmt_usd(_implied_ev)}</span>"
+                    f"<span style='font-size:13px;color:{MUTED}'>{_arr_lbl}: {fmt_usd(_arr_base)}</span>"
+                    f"</div>"
+                    f"<div style='position:relative;height:14px;margin-bottom:6px'>"
+                    f"<div style='background:linear-gradient(to right,{BG} 0%,{GREEN} 100%);"
+                    f"border-radius:7px;height:14px;width:100%'></div>"
+                    f"<div style='position:absolute;top:50%;left:{_marker_left:.1f}%;"
+                    f"transform:translate(-50%,-50%)'>"
+                    f"<div style='width:20px;height:20px;border-radius:50%;background:{BLACK};"
+                    f"border:3px solid {WHITE};box-shadow:0 0 0 2px {BLACK}'></div>"
+                    f"</div></div>"
+                    f"<div style='display:flex;justify-content:space-between;margin-bottom:14px'>"
+                    f"<span style='font-size:11px;color:{MUTED}'>$0</span>"
+                    f"<span style='font-size:11px;color:{MUTED}'>Comp median exit (${_KH_REV_SCALE:.0f}M)</span>"
+                    f"</div>"
+                    f"<div style='font-size:12px;color:{MUTED};border-top:1px solid {BORDER};padding-top:12px'>"
+                    f"<b style='color:{BLACK}'>Methodology:</b> 10–15x ARR multiple (EWA / digital workforce banking benchmark). "
+                    f"Payfare acquired at ~0.6x revenue (depressed public market); DailyPay ~7x; MNT-Halan ~3x. "
+                    f"ARR multiple applied given Khazna's recurring lending revenue model. "
+                    f"Khazna is at <b style='color:{BLACK}'>{_scale_pct:.0f}%</b> of comp median exit revenue scale."
+                    f"</div></div>",
+                    unsafe_allow_html=True,
+                )
+
+            # ── Section 4: Stage progression tracker ──────────────────────────
+            if _kh_rev is not None:
+                _ltm_m = _kh_rev / 1e6
+                _KH_STAGES = [
+                    ("Early Stage", "< $5M revenue"),
+                    ("Growth",      "$6M – $30M revenue"),
+                    ("Pre-Exit",    "$31M – $100M revenue"),
+                    ("Exit Ready",  "> $100M + EBITDA positive"),
+                ]
+                if _ltm_m < 5:
+                    _kh_stage = 0
+                elif _ltm_m <= 30:
+                    _kh_stage = 1
+                elif _ltm_m <= 100:
+                    _kh_stage = 2
+                elif _kh_em is not None and _kh_em > 0:
+                    _kh_stage = 3
+                else:
+                    _kh_stage = 2
+
+                st.markdown(
+                    f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
+                    f"color:{MUTED};font-weight:600;margin-bottom:14px'>Stage Progression</div>",
+                    unsafe_allow_html=True,
+                )
+                _nodes_html = ""
+                for _si, (_sname, _sublbl) in enumerate(_KH_STAGES):
+                    _is_cur   = (_si == _kh_stage)
+                    _dot_bg   = GREEN  if _is_cur else WHITE
+                    _dot_bdr  = BLACK  if _is_cur else BORDER
+                    _dot_sz   = "20px" if _is_cur else "14px"
+                    _lbl_fw   = "700"  if _is_cur else "400"
+                    _lbl_col  = BLACK  if _is_cur else MUTED
+                    _ll_bg    = BORDER if _si > 0 else "transparent"
+                    _rl_bg    = BORDER if _si < 3 else "transparent"
+                    _dot_shad = f"0 0 0 3px {GREEN}" if _is_cur else "none"
+                    _badge    = (
+                        f"<div style='background:{GREEN};color:{BLACK};border-radius:4px;"
+                        f"padding:1px 8px;font-size:10px;font-weight:700;margin-bottom:5px;"
+                        f"display:inline-block;white-space:nowrap'>Khazna</div><br>"
+                        if _is_cur else "<br>"
+                    )
+                    _nodes_html += (
+                        f"<div style='flex:1;text-align:center;padding:0 8px'>"
+                        f"{_badge}"
+                        f"<div style='font-size:13px;font-weight:{_lbl_fw};color:{_lbl_col};"
+                        f"margin-bottom:10px'>{_sname}</div>"
+                        f"<div style='display:flex;align-items:center;justify-content:center;"
+                        f"margin-bottom:10px'>"
+                        f"<div style='height:2px;flex:1;background:{_ll_bg}'></div>"
+                        f"<div style='width:{_dot_sz};height:{_dot_sz};border-radius:50%;"
+                        f"background:{_dot_bg};border:2px solid {_dot_bdr};flex-shrink:0;"
+                        f"box-shadow:{_dot_shad}'></div>"
+                        f"<div style='height:2px;flex:1;background:{_rl_bg}'></div>"
+                        f"</div>"
+                        f"<div style='font-size:10px;color:{MUTED};text-align:center'>{_sublbl}</div>"
+                        f"</div>"
+                    )
+                st.markdown(
+                    f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
+                    f"padding:24px 20px;display:flex;align-items:flex-start;margin-bottom:20px'>"
+                    f"{_nodes_html}</div>",
+                    unsafe_allow_html=True,
+                )
+
             # ── Comp set reference cards ───────────────────────────────────────
             st.markdown(
-                f"<div style='font-size:13px;font-weight:500;color:{MUTED};margin:0 0 10px;letter-spacing:.3px'>"
-                f"Comp Set — EWA and Digital Workforce Banking</div>",
+                f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
+                f"color:{MUTED};font-weight:600;margin-bottom:12px'>Comp Set — EWA and Digital Workforce Banking</div>",
                 unsafe_allow_html=True,
             )
             _ref_comps = [
@@ -1264,13 +1571,15 @@ def render_benchmarking_tab(
                 ("Wagestream", MUTED,     "Investor (Stake)",   "—",        "~$300M+ est.",  "—",         "Already holds Khazna stake. Global EWA portfolio (Refyne, GajiGesa). Most important signal."),
             ]
             _ref_cols = st.columns(2)
-            for _i, (_co, _col, _st2, _dt, _vl, _mu, _nt) in enumerate(_ref_comps):
+            for _i, (_co, _col, _cst, _dt, _vl, _mu, _nt) in enumerate(_ref_comps):
                 with _ref_cols[_i % 2]:
                     st.markdown(
-                        f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:8px;padding:14px 16px;margin-bottom:10px'>"
+                        f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:8px;"
+                        f"padding:14px 16px;margin-bottom:10px'>"
                         f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:8px'>"
                         f"<span style='font-size:14px;font-weight:700;color:{BLACK}'>{_co}</span>"
-                        f"<span style='font-size:11px;font-weight:600;color:{_col};background:{BG};border-radius:4px;padding:2px 7px'>{_st2}</span>"
+                        f"<span style='font-size:11px;font-weight:600;color:{_col};background:{BG};"
+                        f"border-radius:4px;padding:2px 7px'>{_cst}</span>"
                         f"</div>"
                         f"<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:8px'>"
                         f"<div><div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.5px'>Date</div>"
