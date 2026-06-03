@@ -429,6 +429,26 @@ def parse_maxsoko(file_bytes: bytes) -> list[dict]:
     row_gp  = find_row(ws, "Gross Profit",   label_col=3, exact=True)
     row_gm  = find_row(ws, "Gross Profit Margin (%)", label_col=3)
     row_ebt = find_row(ws, "EBITDA",         label_col=3, exact=True)
+    row_net = (
+        _first_row(
+            "net income", "net profit", "profit after tax", "pat",
+            "net profit/(loss)", "net income/(loss)", "net loss",
+            ws=ws, label_col=3, exact=True,
+        ) or _first_row(
+            "net income", "net profit", "profit after tax",
+            ws=ws, label_col=3,
+        )
+    )
+    row_gmv = _first_row(
+        "gmv", "gross merchandise value", "total volume", "order volume",
+        "total order value", "orders volume", "total orders value",
+        ws=ws, label_col=3,
+    )
+    row_ac = _first_row(
+        "active clients", "active buyers", "active users", "active retailers",
+        "number of clients", "total clients", "buyers", "retailers",
+        ws=ws, label_col=3,
+    )
 
     if row_rev is None:
         raise ValueError(
@@ -457,23 +477,38 @@ def parse_maxsoko(file_bytes: bytes) -> list[dict]:
         gp  = safe_float(ws.cell(row_gp,  col).value) if row_gp  else None
         gm  = safe_float(ws.cell(row_gm,  col).value) if row_gm  else None
         ebt = safe_float(ws.cell(row_ebt, col).value) if row_ebt else None
+        net = safe_float(ws.cell(row_net, col).value) if row_net else None
+        gmv = safe_float(ws.cell(row_gmv, col).value) if row_gmv else None
+        ac  = safe_float(ws.cell(row_ac,  col).value) if row_ac  else None
 
         # Prefer explicit GM% column; fall back to GP/Rev
         gm_pct = (
             round(gm * 100, 4)          if gm  is not None else
             round(gp / rev * 100, 4)    if gp  is not None else None
         )
-        em_pct = round(ebt / rev * 100, 4) if ebt is not None else None
+        em_pct  = round(ebt / rev * 100, 4) if ebt is not None else None
+        net_pct = round(net / rev * 100, 4) if net is not None else None
+
+        if results and results[-1].get("revenue_usd"):
+            prior = results[-1]["revenue_usd"]
+            rev_growth = round((rev - prior) / prior * 100, 4) if prior > 0 else None
+        else:
+            rev_growth = None
 
         results.append({
-            "period_end_date":    period,
-            "reporting_currency": "USD",
-            "fx_rate_to_usd":     1.0,
-            "revenue_usd":        round(rev, 2),
-            "gross_profit_usd":   round(gp,  2) if gp  is not None else None,
-            "gross_margin_pct":   gm_pct,
-            "ebitda_usd":         round(ebt, 2) if ebt is not None else None,
-            "ebitda_margin_pct":  em_pct,
+            "period_end_date":      period,
+            "reporting_currency":   "USD",
+            "fx_rate_to_usd":       1.0,
+            "revenue_usd":          round(rev, 2),
+            "gross_profit_usd":     round(gp,  2) if gp  is not None else None,
+            "gross_margin_pct":     gm_pct,
+            "ebitda_usd":           round(ebt, 2) if ebt is not None else None,
+            "ebitda_margin_pct":    em_pct,
+            "net_income_usd":       round(net, 2) if net is not None else None,
+            "net_margin_pct":       net_pct,
+            "gmv_usd":              round(gmv, 2) if gmv is not None else None,
+            "active_clients_count": int(ac) if ac is not None else None,
+            "revenue_growth_pct":   rev_growth,
         })
 
     return results

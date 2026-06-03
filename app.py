@@ -276,6 +276,18 @@ def _init_db() -> None:
         )
     """)
 
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ipo_readiness (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id  INTEGER NOT NULL,
+            item_key    TEXT    NOT NULL,
+            status      TEXT    NOT NULL DEFAULT 'Not Started',
+            notes       TEXT    DEFAULT '',
+            updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(company_id, item_key)
+        )
+    """)
+
     conn.commit()
 
     # Idempotently add columns that were introduced after the initial schema
@@ -711,6 +723,36 @@ def _db_global_version() -> str:
     finally:
         conn.close()
     return str(row[0]) if (row and row[0]) else "none"
+
+
+def _ipo_readiness_load(company_id: int) -> dict:
+    """Return {item_key: {status, notes, updated_at}} from ipo_readiness table."""
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT item_key, status, notes, updated_at FROM ipo_readiness WHERE company_id=?",
+            (company_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+    return {r[0]: {"status": r[1], "notes": r[2] or "", "updated_at": r[3] or ""} for r in rows}
+
+
+def _ipo_readiness_save(company_id: int, updates: dict) -> None:
+    """Upsert {item_key: {status, notes}} rows into ipo_readiness."""
+    conn = _conn()
+    try:
+        for item_key, data in updates.items():
+            conn.execute(
+                "INSERT INTO ipo_readiness (company_id, item_key, status, notes, updated_at) "
+                "VALUES (?, ?, ?, ?, datetime('now')) "
+                "ON CONFLICT(company_id, item_key) DO UPDATE SET "
+                "status=excluded.status, notes=excluded.notes, updated_at=excluded.updated_at",
+                (company_id, item_key, data.get("status", "Not Started"), data.get("notes", ""))
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ── Formatters ─────────────────────────────────────────────────────────────────
@@ -4744,6 +4786,496 @@ def _render_twinco_exit_tab() -> None:
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
 
+# ── MaxSoko custom exit tab ───────────────────────────────────────────────────
+
+_MAXSOKO_TADAWUL_ITEMS = [
+    ("tadawul_cma_review",        "CMA (Capital Market Authority) eligibility review initiated"),
+    ("tadawul_audited_financials", "Minimum 2 years audited financial statements (IFRS)"),
+    ("tadawul_saudi_entity",       "Saudi legal entity established (registered in KSA)"),
+    ("tadawul_sama",               "SAMA regulatory standing confirmed"),
+    ("tadawul_ksa_revenue",        "KSA revenue exceeds SAR 50M annualised"),
+    ("tadawul_profitability",      "Company profitable or clear 12-month path to profitability"),
+    ("tadawul_lead_advisor",       "Lead financial advisor / investment bank appointed"),
+    ("tadawul_ir",                 "Investor relations function established"),
+    ("tadawul_governance",         "Corporate governance structure meets CMA standards"),
+    ("tadawul_lockup",             "Lock-up and free float structure agreed with founders"),
+]
+
+_MAXSOKO_STRATEGIC_ITEMS = [
+    ("strategic_ksa_revenue",      "KSA operations generating meaningful revenue (>20% of total)"),
+    ("strategic_embedded_finance", "Embedded finance product live in KSA"),
+    ("strategic_gcc_investors",    "At least 2 anchor GCC institutional investors on cap table"),
+    ("strategic_saudi_partner",    "Saudi co-investor or strategic partner confirmed"),
+    ("strategic_comp_identified",  "Comparable Saudi tech listing comp identified (Jahez used as proxy)"),
+    ("strategic_saudi_director",   "Board composition includes Saudi independent director"),
+    ("strategic_vision2030",       "Vision 2030 alignment narrative documented"),
+    ("strategic_pre_ipo_round",    "Pre-IPO growth equity round closed"),
+]
+
+
+def _render_maxsoko_exit_tab() -> None:
+    AMBER     = "#FFC107"
+    GREEN_DOT = "#D5FA94"
+    EMPTY     = "#D4D5CE"
+
+    # ── Look up company_id and LTM revenue ───────────────────────────────────
+    _ms_id_row = pd.read_sql_query(
+        "SELECT id FROM companies WHERE name = 'MaxSoko' LIMIT 1", _conn()
+    )
+    _maxsoko_id = int(_ms_id_row.iloc[0]["id"]) if not _ms_id_row.empty else None
+    ltm_revenue = None
+    if _maxsoko_id:
+        _ltm_df = load_ltm_revenue(db_version=_db_global_version())
+        _vrow   = _ltm_df[_ltm_df["id"] == _maxsoko_id]
+        if not _vrow.empty and _vrow.iloc[0]["ltm_revenue"] is not None:
+            ltm_revenue = float(_vrow.iloc[0]["ltm_revenue"])
+
+    # ── Section 1: Exit Pathways (collapsed) ─────────────────────────────────
+    def _pathway_card(title, valuation, description, feasibility_dots, tag, highlight=False):
+        border_extra = "border-left:3px solid #D5FA94;" if highlight else ""
+        dots_html = "".join(
+            f"<span style='display:inline-block;width:10px;height:10px;border-radius:50%;"
+            f"background:{d};margin-right:3px'></span>"
+            for d in feasibility_dots
+        )
+        rev_line = (
+            f"<div style='font-size:12px;color:{MUTED};margin-top:2px'>{valuation[1]}</div>"
+            if len(valuation) > 1 else ""
+        )
+        return f"""
+<div style='background:#FFFFFF;border:1px solid #D4D5CE;{border_extra}border-radius:8px;
+     padding:16px;height:100%'>
+  <div style='font-size:14px;font-weight:700;color:#2C2C2A;margin-bottom:4px'>{title}</div>
+  <div style='font-size:10px;color:#93A3A1;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px'>Valuation</div>
+  <div style='font-size:13px;color:#2C2C2A'>{valuation[0]}</div>
+  {rev_line}
+  <div style='font-size:12px;color:#93A3A1;font-style:italic;margin:6px 0 8px'>{description}</div>
+  <div style='margin:4px 0 8px'>{dots_html}</div>
+  <span style='font-size:11px;font-weight:600;color:{MUTED};background:#EFF0EA;
+    border-radius:4px;padding:2px 7px'>{tag}</span>
+</div>"""
+
+    pathways = [
+        (
+            "Remain Independent — Quona Pursues Secondaries",
+            ["$50–100M"],
+            "Continue scaling Egypt and KSA operations independently — limited investor liquidity without a clear exit trigger",
+            [AMBER, EMPTY, EMPTY], "Unattractive strategically", False,
+        ),
+        (
+            "Strategic Sale to FMCG Conglomerate or Regional Distributor",
+            ["$80–150M", "2–4x revenue"],
+            "Acquisition by a Saudi or pan-regional FMCG distributor or retailer seeking to own digital B2B distribution infrastructure",
+            [AMBER, AMBER, EMPTY], "Possible — 24–36 months", False,
+        ),
+        (
+            "Saudi IPO (Tadawul / Nomu)",
+            ["$150–400M", "3–6x revenue"],
+            "Founder's stated goal — list on Tadawul Main Market or Nomu parallel market following Saudi revenue scale-up and profitability milestone. Jahez listed at $2.4B on Nomu in 2022 as the first Saudi tech IPO — the benchmark for this path",
+            [GREEN_DOT, AMBER, EMPTY], "Founder preferred — 3–5 years", True,
+        ),
+        (
+            "PE Growth Equity Recap",
+            ["$80–150M"],
+            "Saudi or regional PE firm provides growth capital and liquidity ahead of IPO — bridge path to Tadawul listing",
+            [AMBER, AMBER, EMPTY], "Bridge to IPO", False,
+        ),
+    ]
+
+    with st.expander("Exit Pathways — click to expand", expanded=False):
+        row1, row2 = st.columns(2), st.columns(2)
+        for idx, (title, val, desc, dots, tag, highlight) in enumerate(pathways):
+            col = row1[idx] if idx < 2 else row2[idx - 2]
+            with col:
+                st.markdown(_pathway_card(title, val, desc, dots, tag, highlight), unsafe_allow_html=True)
+                st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 2: Implied Valuation Range ───────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 6px 0;letter-spacing:.3px'>Implied Valuation Range</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:16px'>"
+        f"Based on comparable exit multiples and Saudi / MENA B2B FMCG benchmarks. "
+        f"LTM Revenue: {fmt_usd(ltm_revenue)}</div>",
+        unsafe_allow_html=True,
+    )
+
+    _HDR = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px"
+    )
+    hcols = st.columns([2, 1, 1, 1, 2])
+    for hc, lbl in zip(hcols, ["Pathway", "Multiple", "Low Case", "Base Case", "High Case"]):
+        with hc:
+            st.markdown(f"<div style='{_HDR}'>{lbl}</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='height:2px;background:{BORDER};margin:6px 0 10px'></div>",
+        unsafe_allow_html=True,
+    )
+
+    def _val_row(pathway_name, tag, tag_bg, tag_fg, multiple_lbl,
+                 low, base, high, base_color, note):
+        cols = st.columns([2, 1, 1, 1, 2])
+        with cols[0]:
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:700;color:{BLACK};padding-top:4px'>"
+                f"{pathway_name}</div>"
+                f"<span style='font-size:11px;font-weight:600;background:{tag_bg};color:{tag_fg};"
+                f"border-radius:4px;padding:2px 7px'>{tag}</span>",
+                unsafe_allow_html=True,
+            )
+        with cols[1]:
+            st.markdown(
+                f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{multiple_lbl}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[2]:
+            st.markdown(
+                f"<div style='font-size:14px;color:{BLACK};padding-top:6px'>{fmt_usd(low)}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[3]:
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:700;color:{base_color};padding-top:6px'>"
+                f"{fmt_usd(base)}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[4]:
+            st.markdown(
+                f"<div style='font-size:14px;color:{MUTED};padding-top:6px'>Up to {fmt_usd(high)}</div>",
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            f"<div style='font-size:11px;color:{MUTED};font-style:italic;margin:4px 0 8px'>{note}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"<hr style='border-color:{BORDER};margin:8px 0'>", unsafe_allow_html=True)
+
+    r = ltm_revenue or 0
+    _val_row(
+        "Saudi IPO (Tadawul / Nomu)",
+        "Founder preferred — 3–5 years", GREEN, BLACK,
+        "3–6x Revenue",
+        r * 3, r * 4.5, r * 6,
+        "#2E7D32",
+        "Jahez listed on Nomu (2022) at $2.4B — first Saudi tech IPO. "
+        "Udaan (India B2B FMCG, $1.8B valuation) trades at ~3.4x revenue after sector repricing. "
+        "Saudi listings command premium to global peers given Vision 2030 tailwinds and domestic liquidity.",
+    )
+    _val_row(
+        "Strategic Sale to FMCG Conglomerate",
+        "Possible", BLUE, "#1565C0",
+        "2–4x Revenue",
+        r * 2, r * 3, r * 4,
+        "#1565C0",
+        "B2B FMCG marketplace acquisitions have repriced significantly since 2021. "
+        "Asset-light models with embedded finance profit drivers command higher multiples than logistics-heavy peers.",
+    )
+    _val_row(
+        "PE Growth Equity Recap",
+        "Bridge to IPO", "#D4D5CE", BLACK,
+        "2–3x Revenue",
+        r * 2, r * 2.5, r * 3,
+        BLACK,
+        "PE recap at modest multiple to fund KSA scale-up and profitability ahead of Tadawul listing. "
+        "Sanabil, STV, and ADQ/DisruptAD are the most relevant regional PE/growth equity investors.",
+    )
+    _val_row(
+        "Remain Independent — Quona Pursues Secondaries",
+        "Unattractive", "#D4D5CE", BLACK,
+        "1–2x Revenue",
+        r * 1, r * 1.5, r * 2,
+        BLACK,
+        "Secondary at distressed multiple without strategic buyer process. "
+        "Avoid unless IPO and sale processes both stall.",
+    )
+
+    st.markdown(
+        f"<div style='background:{BG};border-radius:8px;padding:12px 16px;"
+        f"font-size:11px;color:{MUTED};margin-top:8px'>"
+        f"Valuation ranges are indicative. Primary comps: Jahez IPO on Nomu ($2.4B, 2022, Saudi food delivery — "
+        f"best available Saudi tech listing proxy), Udaan (India B2B FMCG, $1.8B valuation at ~3.4x revenue, "
+        f"IPO prep 2026). Global B2B FMCG marketplace sector has repriced materially since 2021 — "
+        f"profitability and asset-light model are now prerequisites for premium valuation."
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 3: Acquirer Universe ─────────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 12px 0;letter-spacing:.3px'>Acquirer Universe — Prioritized</div>",
+        unsafe_allow_html=True,
+    )
+
+    FIT_COLORS = {
+        "Very High":  ("#D5FA94", "#2C2C2A"),
+        "High":       ("#C5E5FF", "#1565C0"),
+        "Medium":     ("#D4D5CE", "#2C2C2A"),
+        "Low-Medium": ("#FFCDD2", "#B71C1C"),
+        "Low":        ("#FFCDD2", "#B71C1C"),
+    }
+
+    def _fit_badge(fit):
+        bg, fg = FIT_COLORS.get(fit, ("#D4D5CE", "#2C2C2A"))
+        return (
+            f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:600;"
+            f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>"
+        )
+
+    def _buyer_row(name, fit, activity, rationale, key, row_idx=0):
+        row_bg = "#EFF0EA" if row_idx % 2 == 0 else "#FFFFFF"
+        with st.container():
+            st.markdown(
+                f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
+                unsafe_allow_html=True,
+            )
+            cols = st.columns([2, 2, 3, 1])
+            with cols[0]:
+                st.markdown(
+                    f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"{_fit_badge(fit)}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[1]:
+                st.markdown(
+                    f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{activity}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[2]:
+                st.markdown(
+                    f"<div style='font-size:13px;color:#2C2C2A;padding-top:6px'>{rationale}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[3]:
+                st.checkbox("", key=key)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    _HDR_STYLE = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px;padding-bottom:4px"
+    )
+
+    def _header_row():
+        hcols  = st.columns([2, 2, 3, 1])
+        labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage Q3?"]
+        for hc, lbl in zip(hcols, labels):
+            with hc:
+                st.markdown(f"<div style='{_HDR_STYLE}'>{lbl}</div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:2px;background:#EFF0EA;margin-bottom:8px'></div>", unsafe_allow_html=True)
+
+    regional_buyers = [
+        ("Bin Dawood Holding", "High",
+         "Saudi grocery retail giant; listed on Tadawul 2020; actively digitising B2B supplier relationships",
+         "MaxSoko's B2B FMCG distribution platform fills Bin Dawood's digital supplier network gap and provides Egypt market entry"),
+        ("Savola Group", "High",
+         "Saudi FMCG conglomerate operating across food manufacturing and retail in MENA; owns Panda Retail and Al Marai stake",
+         "MaxSoko's Egypt and KSA B2B distribution data and retailer relationships directly complement Savola's FMCG supply chain"),
+        ("Fawry", "Medium",
+         "Egypt's leading digital payments platform, listed on EGX; launched Fawry Business with SME invoicing and payroll in 2025",
+         "MaxSoko's embedded finance layer and retailer network complement Fawry's SME payments expansion"),
+        ("LuLu Group", "Medium",
+         "GCC hypermarket giant expanding digital B2B procurement and supplier digitisation",
+         "MaxSoko's B2B FMCG marketplace infrastructure could power LuLu's supplier digitisation across Egypt and KSA"),
+    ]
+
+    global_strategics = [
+        ("AB InBev (BEES)", "High",
+         "BEES B2B platform expanded across 10+ African and MENA markets; building trade credit and embedded finance modules",
+         "MaxSoko's retailer data and FMCG distribution rails complement BEES's order-to-sellout data ambitions in Egypt and KSA"),
+        ("Olam International", "Medium",
+         "Singapore-based agri and FMCG conglomerate with deep Africa and MENA distribution; scaling digital trade platforms",
+         "MaxSoko's B2B marketplace and embedded finance layer would accelerate Olam's digital distribution ambitions in North Africa"),
+        ("Udaan", "Medium",
+         "India B2B FMCG marketplace, $1.8B valuation, raising $114M ahead of 2026 IPO; exploring international expansion",
+         "MaxSoko is the closest comp to Udaan outside India — a merger or partnership could create a multi-market EM B2B FMCG platform pre-IPO"),
+    ]
+
+    pe_growth = [
+        ("Sanabil Investments", "Very High",
+         "Saudi sovereign VC/PE arm of PIF; actively backing Saudi and MENA tech growth companies pre-IPO",
+         "MaxSoko's Saudi IPO ambition aligns directly with Sanabil's mandate to build Tadawul-ready tech companies"),
+        ("STV (Saudi Technology Ventures)", "Very High",
+         "500M MENA-focused growth tech fund; backed multiple Tadawul IPO candidates including Jahez",
+         "STV has a direct playbook for backing MENA tech companies through growth stage to Tadawul listing — ideal bridge investor for MaxSoko"),
+        ("ADQ / DisruptAD", "High",
+         "Abu Dhabi investment arm; invested in MaxAB pre-Series B alongside British International Investment",
+         "Already backed MaxSoko's closest comp (MaxAB) — natural path to back MaxSoko's Saudi expansion and IPO journey"),
+        ("Algebra Ventures", "High",
+         "Leading Egypt-focused VC/growth fund; backed multiple Egyptian tech exits",
+         "Deep Egypt market knowledge and relationships make Algebra a credible bridge investor ahead of MaxSoko's regional scale-up"),
+    ]
+
+    tab_reg, tab_global, tab_pe = st.tabs(["Regional Buyers", "Global Strategics", "PE / Growth Equity"])
+    with tab_reg:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(regional_buyers):
+            key = "engage_maxsoko_reg_" + name.replace(" ", "").replace("/", "").replace("(", "").replace(")", "")
+            _buyer_row(name, fit, activity, rationale, key, row_idx=idx)
+    with tab_global:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(global_strategics):
+            key = "engage_maxsoko_glob_" + name.replace(" ", "").replace("/", "").replace("(", "").replace(")", "")
+            _buyer_row(name, fit, activity, rationale, key, row_idx=idx)
+    with tab_pe:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(pe_growth):
+            key = "engage_maxsoko_pe_" + name.replace(" ", "").replace("/", "").replace("(", "").replace(")", "")
+            _buyer_row(name, fit, activity, rationale, key, row_idx=idx)
+
+    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+
+    # ── Section 4: Saudi IPO Readiness Tracker ───────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:700;color:{BLACK};"
+        f"margin:0 0 2px 0;letter-spacing:.3px'>Saudi IPO Readiness Tracker</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:16px'>"
+        f"Updated quarterly — tracks MaxSoko's progress against Tadawul / Nomu listing prerequisites.</div>",
+        unsafe_allow_html=True,
+    )
+
+    if _maxsoko_id is None:
+        st.warning("Cannot load IPO tracker: MaxSoko company record not found in database.")
+        return
+
+    # Load from DB once per session
+    _ss_loaded = "maxsoko_ipo_loaded"
+    _all_items = _MAXSOKO_TADAWUL_ITEMS + _MAXSOKO_STRATEGIC_ITEMS
+    if not st.session_state.get(_ss_loaded):
+        _ipo_db = _ipo_readiness_load(_maxsoko_id)
+        for _ik, _ in _all_items:
+            _d = _ipo_db.get(_ik, {})
+            if f"maxsoko_ipo_{_ik}_status" not in st.session_state:
+                st.session_state[f"maxsoko_ipo_{_ik}_status"] = _d.get("status", "Not Started")
+            if f"maxsoko_ipo_{_ik}_notes" not in st.session_state:
+                st.session_state[f"maxsoko_ipo_{_ik}_notes"]  = _d.get("notes", "")
+        st.session_state["maxsoko_ipo_db_data"] = _ipo_db
+        st.session_state[_ss_loaded] = True
+
+    _ipo_db_data = st.session_state.get("maxsoko_ipo_db_data", {})
+
+    # Progress bar
+    _n_complete = sum(
+        1 for _ik, _ in _all_items
+        if st.session_state.get(f"maxsoko_ipo_{_ik}_status") == "Complete"
+    )
+    _n_total  = len(_all_items)
+    _progress = _n_complete / _n_total if _n_total else 0
+    st.progress(_progress, text=f"{_n_complete} / {_n_total} items complete ({_progress * 100:.0f}%)")
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+    _STATUS_OPTS   = ["Not Started", "In Progress", "Complete"]
+    _STATUS_COLORS = {"Not Started": MUTED, "In Progress": WARN, "Complete": "#2E7D32"}
+
+    def _ipo_checklist(container, items, title):
+        with container:
+            st.markdown(
+                f"<div style='font-size:11px;font-weight:700;color:{MUTED};text-transform:uppercase;"
+                f"letter-spacing:.5px;margin-bottom:10px;border-bottom:1px solid {BORDER};padding-bottom:6px'>"
+                f"{title}</div>",
+                unsafe_allow_html=True,
+            )
+            for item_key, label in items:
+                _ss_status = f"maxsoko_ipo_{item_key}_status"
+                _ss_notes  = f"maxsoko_ipo_{item_key}_notes"
+                _cur       = st.session_state.get(_ss_status, "Not Started")
+                _dot_col   = _STATUS_COLORS.get(_cur, MUTED)
+                _updated   = _ipo_db_data.get(item_key, {}).get("updated_at", "")
+
+                st.markdown(
+                    f"<div style='font-size:12px;color:{BLACK};margin:10px 0 3px;display:flex;"
+                    f"align-items:flex-start;gap:8px'>"
+                    f"<span style='display:inline-block;width:8px;height:8px;border-radius:50%;"
+                    f"background:{_dot_col};margin-top:3px;flex-shrink:0'></span>"
+                    f"<span>{label}</span></div>",
+                    unsafe_allow_html=True,
+                )
+                _c1, _c2 = st.columns([1, 2])
+                with _c1:
+                    st.selectbox(
+                        "", _STATUS_OPTS,
+                        key=_ss_status,
+                        label_visibility="collapsed",
+                    )
+                with _c2:
+                    st.text_input(
+                        "", key=_ss_notes,
+                        placeholder="Notes…",
+                        label_visibility="collapsed",
+                    )
+                if _updated:
+                    st.markdown(
+                        f"<div style='font-size:10px;color:{MUTED};margin:-4px 0 4px'>Updated: {_updated[:16]}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+    _col_l, _col_r = st.columns(2)
+    _ipo_checklist(_col_l, _MAXSOKO_TADAWUL_ITEMS,   "Tadawul / Nomu Requirements")
+    _ipo_checklist(_col_r, _MAXSOKO_STRATEGIC_ITEMS, "Strategic Readiness")
+
+    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+
+    if st.button("Save Progress", key="maxsoko_ipo_save", type="primary"):
+        _updates = {
+            _ik: {
+                "status": st.session_state.get(f"maxsoko_ipo_{_ik}_status", "Not Started"),
+                "notes":  st.session_state.get(f"maxsoko_ipo_{_ik}_notes", ""),
+            }
+            for _ik, _ in _all_items
+        }
+        _ipo_readiness_save(_maxsoko_id, _updates)
+        st.session_state.pop("maxsoko_ipo_db_data", None)
+        st.session_state.pop("maxsoko_ipo_loaded", None)
+        st.success("IPO readiness progress saved.")
+        st.rerun()
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # Comp Set Reference panel
+    st.markdown(
+        f"<div style='font-size:12px;font-weight:700;color:{MUTED};text-transform:uppercase;"
+        f"letter-spacing:.5px;margin-bottom:10px'>Comp Set Reference</div>",
+        unsafe_allow_html=True,
+    )
+    _COMPS_REF = [
+        ("Jahez",  "Listed Nomu January 2022", "IPO valuation $2.4B", "Revenue at listing ~$325M", "~7x revenue", "Saudi food delivery"),
+        ("Udaan",  "India B2B FMCG",           "Valuation $1.8B (2024)", "Revenue $530M",          "~3.4x",       "IPO prep 2026"),
+    ]
+    _comp_cell = f"font-size:12px;color:{MUTED};padding:8px 14px"
+    _comp_rows = ""
+    for i, (co, evt, val, rev, mult, note) in enumerate(_COMPS_REF):
+        _bg = "#E8F5E9" if i == 0 else "#F1F8E9"
+        _comp_rows += (
+            f"<div style='display:grid;grid-template-columns:0.8fr 1.2fr 1fr 1fr 0.7fr 1fr;"
+            f"background:{_bg};border-radius:6px;margin-bottom:4px'>"
+            f"<div style='font-size:13px;font-weight:700;color:#2E7D32;padding:8px 14px'>{co}</div>"
+            f"<div style='{_comp_cell}'>{evt}</div>"
+            f"<div style='{_comp_cell}'>{val}</div>"
+            f"<div style='{_comp_cell}'>{rev}</div>"
+            f"<div style='font-size:13px;font-weight:600;color:#2E7D32;padding:8px 14px'>{mult}</div>"
+            f"<div style='{_comp_cell}'>{note}</div>"
+            f"</div>"
+        )
+    st.markdown(
+        f"<div style='background:#F9FBF7;border:1px solid #C8E6C9;border-radius:10px;padding:14px'>"
+        + _comp_rows
+        + f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+
 # ── Exit Tracking tab ─────────────────────────────────────────────────────────
 
 def render_exit_tab(info: pd.Series, company_id: int) -> None:
@@ -4775,6 +5307,11 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
     # ── TWINCO custom exit tab ─────────────────────────────────────────────────
     if company_name in ("TWINCO", "Twinco"):
         _render_twinco_exit_tab()
+        return
+
+    # ── MaxSoko custom exit tab ────────────────────────────────────────────────
+    if company_name == "MaxSoko":
+        _render_maxsoko_exit_tab()
         return
 
     LIKELIHOOD_OPTS = ["Exploratory", "Active", "Advanced", "On Hold"]
