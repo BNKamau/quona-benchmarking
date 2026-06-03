@@ -29,6 +29,3 @@ Thumbs.db
 
 # Streamlit secrets
 .streamlit/secrets.toml
-
-# MyFonts original kit — only static/fonts/ copies are committed
-MyFontsWebfontsKit/
