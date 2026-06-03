@@ -28,6 +28,57 @@ WARN_BG = "#FFF3E0"
 # ── Global CSS ────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <style>
+  /* ── Sombra web fonts ───────────────────────────────────────────────────── */
+  @font-face {{
+    font-family: "Sombra-Black";
+    src: url('app/static/fonts/SombraBlack/font.woff2') format('woff2'),
+         url('app/static/fonts/SombraBlack/font.woff') format('woff');
+    font-weight: 900;
+    font-style: normal;
+    font-display: swap;
+  }}
+  @font-face {{
+    font-family: "Sombra-Bold";
+    src: url('app/static/fonts/SombraBold/font.woff2') format('woff2'),
+         url('app/static/fonts/SombraBold/font.woff') format('woff');
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+  }}
+  @font-face {{
+    font-family: "Sombra-Regular";
+    src: url('app/static/fonts/SombraRegular/font.woff2') format('woff2'),
+         url('app/static/fonts/SombraRegular/font.woff') format('woff');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+  }}
+
+  /* ── Global defaults ────────────────────────────────────────────────────── */
+  html, body, [class*="css"], .stApp, .stMarkdown, p, span, div, li, td, th, label {{
+    font-family: "Sombra-Regular", sans-serif !important;
+  }}
+
+  /* ── Headers and bold UI elements → Sombra-Bold ────────────────────────── */
+  h1, h2, h3, h4, h5, h6,
+  [data-testid="stMetricLabel"],
+  [data-testid="stTab"] p,
+  [data-testid="stSidebarNav"] span,
+  .stButton > button,
+  [data-testid="stSelectbox"] div[data-baseweb],
+  div[role="radiogroup"] label p,
+  [data-testid="stMarkdownContainer"] strong,
+  [data-testid="stMarkdownContainer"] b {{
+    font-family: "Sombra-Bold", sans-serif !important;
+  }}
+
+  /* ── Large display numbers / hero metrics → Sombra-Black ───────────────── */
+  [data-testid="stMetricValue"] {{
+    font-family: "Sombra-Black", sans-serif !important;
+    font-size: 22px;
+  }}
+
+  /* ── App chrome ─────────────────────────────────────────────────────────── */
   .stApp {{ background-color:{BG}; color:{BLACK}; }}
   #MainMenu, footer, header {{ visibility:hidden; }}
   .block-container {{ padding-top:1.5rem; padding-bottom:2rem; max-width:1400px; }}
@@ -37,7 +88,6 @@ st.markdown(f"""
       border-radius:10px; padding:16px 20px;
   }}
   [data-testid="stMetricLabel"] {{ color:{MUTED}; font-size:11px; text-transform:uppercase; letter-spacing:.5px; }}
-  [data-testid="stMetricValue"] {{ color:{BLACK}; font-size:22px; font-weight:700; }}
 
   .stButton > button {{
       background:{GREEN}; color:{BLACK}; border:none;
