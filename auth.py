@@ -12,22 +12,20 @@ Setup instructions
    - Application type: Web application
    - Name: Quona Benchmarking
    - Authorised redirect URIs:
-       https://your-app.streamlit.app      ← Streamlit Cloud
+       https://your-app.streamlit.app      ← Streamlit Cloud (exact URL, no trailing slash)
        http://localhost:8501               ← local dev
 5. Copy the Client ID and Client Secret into Streamlit Cloud app secrets
    (or .streamlit/secrets.toml locally — see secrets.toml.example):
        GOOGLE_CLIENT_ID     = "….apps.googleusercontent.com"
        GOOGLE_CLIENT_SECRET = "GOCSPX-…"
        ALLOWED_DOMAIN       = "quona.com"
-       REDIRECT_URI         = "https://your-app.streamlit.app"
+       REDIRECT_URI         = "https://your-app.streamlit.app"   ← must exactly match step 4
 
 Session persistence
 ───────────────────
 Authentication is stored in st.session_state, which survives Streamlit re-runs
 and page refreshes within the same browser tab (WebSocket session). Opening a new
-tab or closing and reopening the browser requires signing in again. This is
-appropriate for an internal tool — add cookie-based persistence if longer-lived
-sessions are required.
+tab or closing and reopening the browser requires signing in again.
 """
 
 import urllib.parse
@@ -45,31 +43,40 @@ _SCOPES       = "openid email profile"
 _USER_KEY = "_quona_auth_user"
 _ERR_KEY  = "_quona_auth_error"
 
-# ── Brand palette (mirrors app.py constants so auth.py is self-contained) ──────
-_BG     = "#EFF0EA"
-_BLACK  = "#2C2C2A"
-_WHITE  = "#FFFFFF"
-_GREEN  = "#D5FA94"
-_BORDER = "#D4D5CE"
-_MUTED  = "#888884"
-_WARN   = "#E65100"
+# ── Brand palette (mirrors app.py so auth.py is self-contained) ────────────────
+_BG      = "#EFF0EA"
+_BLACK   = "#2C2C2A"
+_WHITE   = "#FFFFFF"
+_GREEN   = "#D5FA94"
+_BORDER  = "#D4D5CE"
+_MUTED   = "#888884"
+_WARN    = "#E65100"
 _WARN_BG = "#FFF3E0"
 
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 def _cfg() -> dict:
-    return {
+    cfg = {
         "client_id":      st.secrets.get("GOOGLE_CLIENT_ID", ""),
         "client_secret":  st.secrets.get("GOOGLE_CLIENT_SECRET", ""),
         "redirect_uri":   st.secrets.get("REDIRECT_URI", "http://localhost:8501"),
         "allowed_domain": st.secrets.get("ALLOWED_DOMAIN", "quona.com"),
     }
+    # Log config status on every call so it appears in Streamlit Cloud logs
+    print(
+        f"[auth] config — "
+        f"client_id={'SET (' + cfg['client_id'][:12] + '...)' if cfg['client_id'] else 'NOT SET'} | "
+        f"client_secret={'SET' if cfg['client_secret'] else 'NOT SET'} | "
+        f"redirect_uri={cfg['redirect_uri']} | "
+        f"allowed_domain={cfg['allowed_domain']}"
+    )
+    return cfg
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def is_authenticated() -> bool:
-    """Returns True when a valid @quona.com user is present in session state."""
+    """True when a valid @quona.com user is present in session state."""
     user = st.session_state.get(_USER_KEY)
     if not user:
         return False
@@ -100,8 +107,7 @@ def render_login_page() -> None:
 
 
 def render_user_sidebar() -> None:
-    """Render the logged-in user's avatar, name, email, and a sign-out button
-    at the bottom of the sidebar."""
+    """Render the logged-in user's avatar, name, email, and a sign-out button."""
     user    = current_user()
     name    = user.get("name", "Quona User")
     email   = user.get("email", "")
@@ -141,13 +147,20 @@ def _build_auth_url() -> str:
         "scope":         _SCOPES,
         "access_type":   "online",
         "prompt":        "select_account",
+        "hd":            cfg["allowed_domain"],   # hint Google to show only @quona.com accounts
     }
-    return _AUTH_URL + "?" + urllib.parse.urlencode(params)
+    url = _AUTH_URL + "?" + urllib.parse.urlencode(params)
+    print(f"[auth] OAuth URL built — redirect_uri={cfg['redirect_uri']}")
+    return url
 
 
-def _exchange_code(code: str) -> dict | None:
-    """Exchange an OAuth authorisation code for user profile info."""
+def _exchange_code(code: str) -> tuple[dict | None, str | None]:
+    """
+    Exchange an OAuth authorisation code for user profile info.
+    Returns (user_info_dict, None) on success, (None, error_message) on failure.
+    """
     cfg = _cfg()
+    print(f"[auth] Exchanging code — redirect_uri={cfg['redirect_uri']}")
     try:
         token_r = requests.post(_TOKEN_URL, data={
             "code":          code,
@@ -156,57 +169,101 @@ def _exchange_code(code: str) -> dict | None:
             "redirect_uri":  cfg["redirect_uri"],
             "grant_type":    "authorization_code",
         }, timeout=10)
-    except requests.RequestException:
-        return None
+    except requests.RequestException as exc:
+        msg = f"Network error contacting Google token endpoint: {exc}"
+        print(f"[auth] {msg}")
+        return None, msg
+
+    print(f"[auth] Token endpoint response: HTTP {token_r.status_code}")
     if not token_r.ok:
-        return None
+        body = token_r.json() if token_r.content else {}
+        google_err  = body.get("error", "unknown_error")
+        google_desc = body.get("error_description", token_r.text[:200])
+        msg = (
+            f"Google token exchange failed ({token_r.status_code}): "
+            f"{google_err} — {google_desc}"
+        )
+        print(f"[auth] {msg}")
+        print(f"[auth] Full token error response: {token_r.text[:500]}")
+        return None, msg
 
     access_token = token_r.json().get("access_token", "")
+    if not access_token:
+        msg = "Token response did not contain an access_token"
+        print(f"[auth] {msg}")
+        return None, msg
+
     try:
         ui_r = requests.get(
             _USERINFO_URL,
             headers={"Authorization": f"Bearer {access_token}"},
             timeout=10,
         )
-    except requests.RequestException:
-        return None
-    return ui_r.json() if ui_r.ok else None
+    except requests.RequestException as exc:
+        msg = f"Network error fetching user info: {exc}"
+        print(f"[auth] {msg}")
+        return None, msg
+
+    print(f"[auth] Userinfo response: HTTP {ui_r.status_code}")
+    if not ui_r.ok:
+        msg = f"Google userinfo endpoint failed ({ui_r.status_code}): {ui_r.text[:200]}"
+        print(f"[auth] {msg}")
+        return None, msg
+
+    user_info = ui_r.json()
+    print(f"[auth] User info retrieved — email={user_info.get('email', 'unknown')}")
+    return user_info, None
 
 
 def _handle_oauth_callback() -> None:
-    """Detect a Google OAuth callback (?code=…) in the URL and process it."""
-    code = st.query_params.get("code")
-    if not code:
+    """
+    Detect a Google OAuth callback in the URL (?code=… or ?error=…) and process it.
+    Handles BOTH success (code) and failure (error) responses from Google.
+    """
+    params = dict(st.query_params)
+    if not params:
         return
 
-    error = st.query_params.get("error")
-    st.query_params.clear()          # clean up the URL immediately
+    code  = params.get("code")
+    error = params.get("error")
 
+    # Not an OAuth callback if neither key is present
+    if not code and not error:
+        return
+
+    print(f"[auth] OAuth callback detected — code={'present' if code else 'absent'}, error={error}")
+    st.query_params.clear()   # clean up the URL immediately
+
+    # Google returned an error (e.g. access_denied, redirect_uri_mismatch)
     if error:
-        st.session_state[_ERR_KEY] = (
-            f"Google sign-in was cancelled ({error}). Please try again."
-        )
+        desc = params.get("error_description", "")
+        msg  = f"Google sign-in error: {error}"
+        if desc:
+            msg += f" — {urllib.parse.unquote_plus(desc)}"
+        print(f"[auth] {msg}")
+        st.session_state[_ERR_KEY] = msg + ". Please try again."
         return
 
-    user_info = _exchange_code(code)
-    if not user_info:
-        st.session_state[_ERR_KEY] = (
-            "Could not retrieve account details from Google. "
-            "Please try again or contact your administrator."
-        )
+    # Exchange the authorisation code for user profile info
+    user_info, exchange_err = _exchange_code(code)
+    if exchange_err:
+        st.session_state[_ERR_KEY] = exchange_err
         return
 
     email   = user_info.get("email", "")
     allowed = _cfg()["allowed_domain"]
     if not email.lower().endswith(f"@{allowed}"):
-        st.session_state[_ERR_KEY] = (
+        msg = (
             f"Access restricted to Quona Capital team members (@{allowed}). "
             f"You signed in as {email}. Please use your Quona email account."
         )
+        print(f"[auth] Domain mismatch — {msg}")
+        st.session_state[_ERR_KEY] = msg
         return
 
     st.session_state[_USER_KEY] = user_info
     st.session_state.pop(_ERR_KEY, None)
+    print(f"[auth] Authentication successful — {email}")
 
 
 def _render_login_ui() -> None:
@@ -222,7 +279,7 @@ def _render_login_ui() -> None:
     with mid:
         st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
 
-        # Error banner (domain mismatch, cancelled sign-in, etc.)
+        # Error banner
         err = st.session_state.get(_ERR_KEY)
         if err:
             st.markdown(
@@ -233,6 +290,7 @@ def _render_login_ui() -> None:
                 unsafe_allow_html=True,
             )
 
+        cfg      = _cfg()
         auth_url = _build_auth_url()
 
         st.markdown(
@@ -284,3 +342,31 @@ def _render_login_ui() -> None:
             f"</div>",
             unsafe_allow_html=True,
         )
+
+        # ── OAuth config debug panel ───────────────────────────────────────────
+        # Shows the exact values being sent to Google so you can verify them
+        # against the Google Cloud Console registration. Remove once working.
+        with st.expander("🔧 OAuth debug — expand if sign-in fails"):
+            client_id_ok  = bool(cfg["client_id"])
+            secret_ok     = bool(cfg["client_secret"])
+            id_preview    = (cfg["client_id"][:20] + "…") if client_id_ok else "NOT SET"
+            id_colour     = "#2E7D32" if client_id_ok else _WARN
+            sec_colour    = "#2E7D32" if secret_ok    else _WARN
+
+            st.markdown(
+                f"<div style='font-size:12px;line-height:2;font-family:monospace'>"
+                f"<b>GOOGLE_CLIENT_ID</b>: "
+                f"<span style='color:{id_colour}'>{id_preview}</span><br>"
+                f"<b>GOOGLE_CLIENT_SECRET</b>: "
+                f"<span style='color:{sec_colour}'>{'SET ✓' if secret_ok else 'NOT SET ✗'}</span><br>"
+                f"<b>REDIRECT_URI being sent to Google</b>:<br>"
+                f"<code style='background:#F5F5F5;padding:4px 8px;border-radius:4px;"
+                f"display:block;margin:4px 0;font-size:13px;color:{_BLACK}'>"
+                f"{cfg['redirect_uri']}</code>"
+                f"<b style='color:{_WARN}'>↑ This must exactly match an Authorised Redirect URI<br>"
+                f"in Google Cloud Console → Credentials → your OAuth 2.0 Client.</b>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            st.code(auth_url, language=None)
+            st.caption("Full OAuth URL sent to Google (for reference)")
