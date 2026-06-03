@@ -6423,17 +6423,6 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
                 st.success("Actions saved.")
 
 
-# ── Authentication gate ───────────────────────────────────────────────────────
-# st.user.is_logged_in requires Streamlit 1.45+ with [auth] in config.toml
-if not getattr(st.user, "is_logged_in", False):
-    st.login("google")
-    st.stop()
-
-if not getattr(st.user, "email", "").endswith("@quona.com"):
-    st.error("Access restricted to @quona.com accounts.")
-    st.logout()
-    st.stop()
-
 # ── TEMPORARY DB DIAGNOSTIC (remove after confirming path) ───────────────────
 _db_debug_banner()
 # ── END DIAGNOSTIC ────────────────────────────────────────────────────────────
@@ -6442,10 +6431,6 @@ _db_debug_banner()
 if "page" not in st.session_state:
     st.session_state.page = "home"
     st.session_state.company_id = None
-
-st.sidebar.write(f"Signed in as {getattr(st.user, 'email', '')}")
-if st.sidebar.button("Sign out"):
-    st.logout()
 
 # ── Persistent header ─────────────────────────────────────────────────────────
 st.markdown(f"""
