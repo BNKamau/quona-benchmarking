@@ -1102,6 +1102,59 @@ def render_benchmarking_tab(
                 f"</div>",
                 unsafe_allow_html=True,
             )
+        elif company_name in ("TWINCO", "Twinco"):
+            _TWINCO_COMPS = [
+                ("Demica",    "Supply Chain Finance Platform", "Acquired by FIS",   "Dec 2024", "$300M",           "$40B AuA — 40% CAGR platform assets"),
+                ("Taulia",    "Working Capital / SCF",         "Acquired by SAP",   "Mar 2022", "~$400M",          "$24M ARR at exit · ~17x ARR · $500B+ processed annually"),
+                ("C2FO",      "Dynamic Discounting / SCF",     "Private",           "—",        "$1B (2019 val.)", "$186M ARR (2025) · ~5x ARR at last valuation"),
+                ("Greensill", "Supply Chain Finance",           "Collapsed",         "Mar 2021", "$1.7B peak",      "Cautionary — fraud and concentration risk"),
+                ("Stenn",     "Invoice Finance",                "Administration",    "Dec 2024", "$900M peak",      "Cautionary — HSBC fraud allegations"),
+            ]
+            _hdr_style = (
+                "font-size:10px;font-weight:700;color:#93A3A1;text-transform:uppercase;"
+                "letter-spacing:.5px;padding:8px 12px"
+            )
+            _cols_w = "1fr 1.2fr 1fr 0.7fr 1fr 2fr"
+            _hdrs   = ["Company", "Type", "Status", "Date", "Valuation", "Key Metrics / Notes"]
+            header_html = (
+                f"<div style='display:grid;grid-template-columns:{_cols_w};"
+                f"border-bottom:1px solid {BORDER};margin-bottom:4px'>"
+                + "".join(f"<div style='{_hdr_style}'>{h}</div>" for h in _hdrs)
+                + "</div>"
+            )
+            rows_html = ""
+            for i, (co, typ, status, dt, val, notes) in enumerate(_TWINCO_COMPS):
+                bg = "#F7F8F5" if i % 2 == 0 else "#FFFFFF"
+                _cautionary = status in ("Collapsed", "Administration")
+                val_color   = "#C62828" if _cautionary else BLACK
+                _cell = (
+                    f"font-size:12px;color:{MUTED};padding:8px 12px;line-height:1.5"
+                )
+                rows_html += (
+                    f"<div style='display:grid;grid-template-columns:{_cols_w};"
+                    f"background:{bg};border-radius:4px'>"
+                    f"<div style='font-size:13px;font-weight:700;color:{BLACK};padding:8px 12px'>{co}</div>"
+                    f"<div style='{_cell}'>{typ}</div>"
+                    f"<div style='font-size:12px;color:{val_color};font-weight:600;padding:8px 12px'>{status}</div>"
+                    f"<div style='{_cell}'>{dt}</div>"
+                    f"<div style='font-size:13px;color:{BLACK};font-weight:600;padding:8px 12px'>{val}</div>"
+                    f"<div style='{_cell}'>{notes}</div>"
+                    f"</div>"
+                )
+            st.markdown(
+                f"<div style='font-size:11px;color:{MUTED};margin-bottom:10px;line-height:1.6'>"
+                f"Exit comp set — supply chain and trade finance platforms globally. "
+                f"Revenue multiples not directly comparable given Twinco's unique PO finance model; "
+                f"AuA-based and ARR-based valuation approaches both relevant.</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
+                f"padding:16px 4px;overflow:hidden'>"
+                + header_html + rows_html
+                + "</div>",
+                unsafe_allow_html=True,
+            )
         else:
             st.markdown(
                 f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
@@ -4315,6 +4368,382 @@ def _render_yoco_exit_tab() -> None:
             )
 
 
+# ── TWINCO custom exit tab ────────────────────────────────────────────────────
+
+def _render_twinco_exit_tab() -> None:
+    # ── Section 1: Exit Pathways (collapsed) ─────────────────────────────────
+    AMBER     = "#FFC107"
+    GREEN_DOT = "#D5FA94"
+    EMPTY     = "#D4D5CE"
+
+    def _pathway_card(title, valuation, description, feasibility_dots, tag, highlight=False):
+        border_extra = "border-left:3px solid #D5FA94;" if highlight else ""
+        dots_html = "".join(
+            f"<span style='display:inline-block;width:10px;height:10px;border-radius:50%;"
+            f"background:{d};margin-right:3px'></span>"
+            for d in feasibility_dots
+        )
+        rev_line = (
+            f"<div style='font-size:12px;color:{MUTED};margin-top:2px'>{valuation[1]}</div>"
+            if len(valuation) > 1 else ""
+        )
+        return f"""
+<div style='background:#FFFFFF;border:1px solid #D4D5CE;{border_extra}border-radius:8px;
+     padding:16px;height:100%'>
+  <div style='font-size:14px;font-weight:700;color:#2C2C2A;margin-bottom:4px'>{title}</div>
+  <div style='font-size:10px;color:#93A3A1;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px'>Valuation</div>
+  <div style='font-size:13px;color:#2C2C2A'>{valuation[0]}</div>
+  {rev_line}
+  <div style='font-size:12px;color:#93A3A1;font-style:italic;margin:6px 0 8px'>{description}</div>
+  <div style='margin:4px 0 8px'>{dots_html}</div>
+  <span style='font-size:11px;font-weight:600;color:{MUTED};background:#EFF0EA;
+    border-radius:4px;padding:2px 7px'>{tag}</span>
+</div>"""
+
+    pathways = [
+        (
+            "Remain Independent — Quona Pursues Secondaries",
+            ["$150–300M", "8–15x ARR"],
+            "Continue scaling PO finance platform globally — strong momentum post Series B but investor timeline pressure building",
+            [AMBER, AMBER, EMPTY], "Unattractive strategically", False,
+        ),
+        (
+            "Strategic Sale to Global Bank",
+            ["$300–600M", "10–20x ARR"],
+            "Acquisition by Santander, HSBC or JPMorgan to own the PO finance layer missing from their SCF stack — Santander already leads the securitisation facility",
+            [GREEN_DOT, GREEN_DOT, AMBER], "Most likely — 24–48 months", True,
+        ),
+        (
+            "Strategic Sale to Financial Infrastructure Player",
+            ["$250–500M", "8–18x ARR"],
+            "Acquisition by FIS, SAP or Mastercard to complete their supply chain finance stack — FIS just acquired Demica for $300M, Twinco is the complementary PO layer",
+            [GREEN_DOT, GREEN_DOT, AMBER], "High strategic fit", False,
+        ),
+        (
+            "IPO or DFI Full Acquisition",
+            ["$200–400M", "7–15x ARR"],
+            "FMO-led full acquisition or public listing as Twinco establishes PO finance as a recognised institutional asset class",
+            [AMBER, AMBER, EMPTY], "Longer term — 4–5 years", False,
+        ),
+    ]
+
+    with st.expander("Exit Pathways — click to expand", expanded=False):
+        row1, row2 = st.columns(2), st.columns(2)
+        for idx, (title, val, desc, dots, tag, highlight) in enumerate(pathways):
+            col = row1[idx] if idx < 2 else row2[idx - 2]
+            with col:
+                st.markdown(_pathway_card(title, val, desc, dots, tag, highlight), unsafe_allow_html=True)
+                st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 2: Implied Valuation Range ───────────────────────────────────
+    _twinco_id_row = pd.read_sql_query(
+        "SELECT id FROM companies WHERE name IN ('TWINCO', 'Twinco') LIMIT 1", _conn()
+    )
+    ltm_revenue = None
+    if not _twinco_id_row.empty:
+        _twinco_id = int(_twinco_id_row.iloc[0]["id"])
+        _ltm_df    = load_ltm_revenue(db_version=_db_global_version())
+        _vrow      = _ltm_df[_ltm_df["id"] == _twinco_id]
+        if not _vrow.empty and _vrow.iloc[0]["ltm_revenue"] is not None:
+            ltm_revenue = float(_vrow.iloc[0]["ltm_revenue"])
+
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 6px 0;letter-spacing:.3px'>Implied Valuation Range</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:16px'>"
+        f"Based on comparable exit multiples and supply chain finance benchmarks. "
+        f"LTM Revenue: {fmt_usd(ltm_revenue)}</div>",
+        unsafe_allow_html=True,
+    )
+
+    _HDR = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px"
+    )
+    hcols = st.columns([2, 1, 1, 1, 2])
+    for hc, lbl in zip(hcols, ["Pathway", "Multiple", "Low Case", "Base Case", "High Case"]):
+        with hc:
+            st.markdown(f"<div style='{_HDR}'>{lbl}</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='height:2px;background:{BORDER};margin:6px 0 10px'></div>",
+        unsafe_allow_html=True,
+    )
+
+    def _val_row(pathway_name, tag, tag_bg, tag_fg, multiple_lbl,
+                 low, base, high, base_color, note):
+        cols = st.columns([2, 1, 1, 1, 2])
+        with cols[0]:
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:700;color:{BLACK};padding-top:4px'>"
+                f"{pathway_name}</div>"
+                f"<span style='font-size:11px;font-weight:600;background:{tag_bg};color:{tag_fg};"
+                f"border-radius:4px;padding:2px 7px'>{tag}</span>",
+                unsafe_allow_html=True,
+            )
+        with cols[1]:
+            st.markdown(
+                f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{multiple_lbl}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[2]:
+            st.markdown(
+                f"<div style='font-size:14px;color:{BLACK};padding-top:6px'>{fmt_usd(low)}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[3]:
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:700;color:{base_color};padding-top:6px'>"
+                f"{fmt_usd(base)}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[4]:
+            st.markdown(
+                f"<div style='font-size:14px;color:{MUTED};padding-top:6px'>Up to {fmt_usd(high)}</div>",
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            f"<div style='font-size:11px;color:{MUTED};font-style:italic;margin:4px 0 8px'>{note}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"<hr style='border-color:{BORDER};margin:8px 0'>", unsafe_allow_html=True)
+
+    r = ltm_revenue or 0
+    _val_row(
+        "Strategic Sale to Global Bank",
+        "Most likely — 24–48 months", GREEN, BLACK,
+        "10–20x ARR",
+        r * 10, r * 15, r * 20,
+        "#2E7D32",
+        "Santander leads €150M securitisation facility — natural path from funder to owner. "
+        "Taulia acquired by SAP at ~17x ARR ($24M ARR, ~$400M deal). "
+        "Demica acquired by FIS for $300M at ~0.75% of $40B AuA.",
+    )
+    _val_row(
+        "Strategic Sale to Financial Infrastructure Player",
+        "High strategic fit", BLUE, "#1565C0",
+        "8–18x ARR",
+        r * 8, r * 13, r * 18,
+        "#1565C0",
+        "FIS acquired Demica (Dec 2024, $300M) — Twinco is the PO finance layer Demica lacks. "
+        "SAP-Taulia precedent shows infrastructure players pay premium multiples for SCF platforms "
+        "with institutional relationships.",
+    )
+    _val_row(
+        "Remain Independent — Quona Pursues Secondaries",
+        "Unattractive", "#D4D5CE", BLACK,
+        "8–15x ARR",
+        r * 8, r * 11, r * 15,
+        BLACK,
+        "C2FO valued at $1B on $186M ARR (~5x). Twinco commands premium given zero-loss track "
+        "record and unique PO finance positioning.",
+    )
+    _val_row(
+        "IPO or DFI Full Acquisition",
+        "Longer term", "#D4D5CE", BLACK,
+        "7–15x ARR",
+        r * 7, r * 11, r * 15,
+        BLACK,
+        "FMO (lead Series B investor) has mandate and precedent for full acquisition of "
+        "impact-aligned fintechs at scale. IPO path requires broader institutional recognition "
+        "of PO finance as asset class.",
+    )
+
+    st.markdown(
+        f"<div style='background:{BG};border-radius:8px;padding:12px 16px;"
+        f"font-size:11px;color:{MUTED};margin-top:8px'>"
+        f"Valuation ranges are indicative. Primary comps: Taulia–SAP (~$400M, ~17x ARR, 2022), "
+        f"Demica–FIS ($300M, ~0.75% of $40B AuA, 2024), C2FO ($1B valuation, ~5x ARR, 2019). "
+        f"Twinco's zero-loss track record across $1B+ transactions and first-mover position in "
+        f"securitisable PO finance support premium to comp set."
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 3: Acquirer Universe ─────────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 12px 0;letter-spacing:.3px'>Acquirer Universe — Prioritized</div>",
+        unsafe_allow_html=True,
+    )
+
+    FIT_COLORS = {
+        "Very High":  ("#D5FA94", "#2C2C2A"),
+        "High":       ("#C5E5FF", "#1565C0"),
+        "Medium":     ("#D4D5CE", "#2C2C2A"),
+        "Low-Medium": ("#FFCDD2", "#B71C1C"),
+        "Low":        ("#FFCDD2", "#B71C1C"),
+    }
+
+    def _fit_badge(fit):
+        bg, fg = FIT_COLORS.get(fit, ("#D4D5CE", "#2C2C2A"))
+        return (
+            f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:600;"
+            f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>"
+        )
+
+    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0, affinity_override=None):
+        row_bg = "#EFF0EA" if row_idx % 2 == 0 else "#FFFFFF"
+        with st.container():
+            st.markdown(
+                f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
+                unsafe_allow_html=True,
+            )
+            cols = st.columns([2, 2, 3, 1, 2])
+            with cols[0]:
+                st.markdown(
+                    f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"{_fit_badge(fit)}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[1]:
+                st.markdown(
+                    f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{activity}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[2]:
+                st.markdown(
+                    f"<div style='font-size:13px;color:#2C2C2A;padding-top:6px'>{rationale}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[3]:
+                st.checkbox("", key=key)
+            with cols[4]:
+                if affinity_override is not None:
+                    st.markdown(
+                        f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{affinity_override}</div>",
+                        unsafe_allow_html=True,
+                    )
+                elif affinity_cache is None:
+                    st.markdown(
+                        f"<div style='font-size:11px;color:{MUTED};padding-top:8px'>Sync Affinity above</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    note = affinity_cache.get(name)
+                    if note is None:
+                        st.markdown(
+                            f"<div style='font-size:11px;color:{MUTED};font-style:italic;padding-top:8px'>Not in Affinity</div>",
+                            unsafe_allow_html=True,
+                        )
+                    elif note.get("stale"):
+                        st.markdown(
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            unsafe_allow_html=True,
+                        )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    strategic_banks = [
+        ("Banco Santander", "Very High",
+         "Leads Twinco's €150M securitisation facility — already the primary funding partner",
+         "Natural path from securitisation funder to full owner of the PO finance platform"),
+        ("BBVA", "Very High",
+         "Provided €50M debt facility to Twinco in 2023 via BBVA Spark",
+         "Deep existing relationship; BBVA's trade finance ambitions align directly with Twinco's EM supplier coverage"),
+        ("HSBC", "High",
+         "World's largest trade finance bank; active partner on Demica's platform before FIS acquisition",
+         "Twinco's PO finance capability fills the pre-invoice gap in HSBC's global SCF offering"),
+        ("Standard Chartered", "High",
+         "Deep EM supply chain finance focus; active Demica platform partner",
+         "Twinco's EM supplier network across Latin America, Asia and Africa aligns with Standard Chartered's corridor strategy"),
+        ("JPMorgan", "Medium",
+         "Invested in Taulia pre-SAP acquisition; major SCF platform operator at scale",
+         "Twinco's PO finance layer would complement JPMorgan's existing invoice-stage SCF capabilities"),
+    ]
+
+    infrastructure_players = [
+        ("FIS", "Very High",
+         "Acquired Demica for $300M (Dec 2024) — explicitly stated ambition to become a leader in supply chain finance",
+         "Twinco is the PO finance layer Demica does not have — acquisition would complete FIS's end-to-end SCF platform from PO to invoice"),
+        ("SAP / Taulia", "High",
+         "SAP acquired Taulia in 2022 for ~$400M; Taulia covers invoice and dynamic discounting stage",
+         "Twinco covers the pre-invoice PO stage — zero overlap with Taulia, highly complementary acquisition to complete SAP's working capital suite"),
+        ("Mastercard", "High",
+         "Partnered with Demica to embed SCF before FIS acquisition; scaling B2B trade finance stack globally",
+         "Twinco's EM supplier coverage and zero-loss underwriting model would strengthen Mastercard's B2B trade finance product"),
+        ("Finastra", "Medium",
+         "Leading trade finance software provider actively acquiring SCF capabilities",
+         "Twinco's PO finance technology would extend Finastra's trade finance platform into the pre-invoice production cycle"),
+        ("Network International", "Medium",
+         "Pan-African and MENA payments infrastructure; acquired DPO Group in 2020",
+         "Twinco's EM supplier footprint across Africa and Latin America overlaps with Network International's geographic expansion strategy"),
+    ]
+
+    secondaries_buyers = [
+        ("FMO", "Very High",
+         "Leads Twinco's Series B equity round; €12.1B committed portfolio across 85+ countries with impact mandate",
+         "Already lead investor — natural path to full acquisition as Twinco scales; FMO has precedent for taking full ownership of impact-aligned fintechs"),
+        ("IFC", "High",
+         "Active in trade finance gap globally; G20 and UN recognition of SCF platforms as critical infrastructure",
+         "Twinco's $1.7T trade finance gap mandate and EM supplier focus aligns directly with IFC's financial inclusion and trade development mission"),
+        ("Prosus", "Medium",
+         "Invested $79.9M in Mintifi (India SCF platform, 2024); building global SCF portfolio",
+         "Twinco fits Prosus's pattern of backing SCF platforms in EM — geographic and product adjacency is strong"),
+    ]
+
+    affinity_cache = st.session_state.get("twinco_affinity_data")
+    _, _sync_btn_col = st.columns([6, 1])
+    with _sync_btn_col:
+        if st.button("Sync Affinity", key="twinco_affinity_sync"):
+            _api_key  = st.secrets.get("AFFINITY_API_KEY", "")
+            all_names = list(dict.fromkeys(
+                [b[0] for b in strategic_banks]
+                + [g[0] for g in infrastructure_players]
+                + [s[0] for s in secondaries_buyers]
+            ))
+            with st.spinner("Fetching Affinity data for all buyers…"):
+                st.session_state["twinco_affinity_data"] = {
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    for bname in all_names
+                }
+            st.rerun()
+
+    _HDR_STYLE = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px;padding-bottom:4px"
+    )
+
+    def _header_row():
+        hcols  = st.columns([2, 2, 3, 1, 2])
+        labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage Q3?", "Last Affinity Contact"]
+        for hc, lbl in zip(hcols, labels):
+            with hc:
+                st.markdown(f"<div style='{_HDR_STYLE}'>{lbl}</div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:2px;background:#EFF0EA;margin-bottom:8px'></div>", unsafe_allow_html=True)
+
+    tab_banks, tab_infra, tab_sec = st.tabs(["Strategic Banks", "Infrastructure Players", "Secondaries Buyers"])
+    with tab_banks:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(strategic_banks):
+            key = "engage_twinco_bank_" + name.replace(" ", "").replace("/", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+    with tab_infra:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(infrastructure_players):
+            key = "engage_twinco_infra_" + name.replace(" ", "").replace("/", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+    with tab_sec:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(secondaries_buyers):
+            key = "engage_twinco_sec_" + name.replace(" ", "").replace("/", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+
 # ── Exit Tracking tab ─────────────────────────────────────────────────────────
 
 def render_exit_tab(info: pd.Series, company_id: int) -> None:
@@ -4341,6 +4770,11 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
     # ── VertoFX custom exit tab ────────────────────────────────────────────────
     if company_name in ("VertoFX", "Verto FX"):
         _render_vertofx_exit_tab()
+        return
+
+    # ── TWINCO custom exit tab ─────────────────────────────────────────────────
+    if company_name in ("TWINCO", "Twinco"):
+        _render_twinco_exit_tab()
         return
 
     LIKELIHOOD_OPTS = ["Exploratory", "Active", "Advanced", "On Hold"]

@@ -15,7 +15,7 @@ import openpyxl
 FX_ZAR: float = 16.5
 FX_NGN: float = 1600.0   # NGN/USD — update periodically
 
-SUPPORTED_COMPANIES: set[str] = {"Yoco", "Lulalend", "Verto", "VertoFX", "MaxSoko", "Cowrywise"}
+SUPPORTED_COMPANIES: set[str] = {"Yoco", "Lulalend", "Verto", "VertoFX", "MaxSoko", "Cowrywise", "Twinco", "TWINCO"}
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -682,6 +682,149 @@ def parse_cowrywise(file_bytes: bytes) -> list[dict]:
     return results
 
 
+# ── Twinco ────────────────────────────────────────────────────────────────────
+
+def parse_twinco(file_bytes: bytes) -> list[dict]:
+    """
+    Flexible label-based parser for Twinco Excel exports.
+
+    Auto-detects sheet, label column, currency, and date columns (same heuristics
+    as parse_cowrywise) since no canonical file format exists yet.
+
+    Metrics extracted:
+      revenue_usd, gross_margin_pct, ebitda_usd, ebitda_margin_pct,
+      net_income_usd, net_margin_pct, gmv_usd (volume financed),
+      active_clients_count, revenue_growth_pct
+    Currency defaults to USD; detects EUR/GBP from header cells.
+    """
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+
+    ws = _cwry_best_sheet(wb)
+    lc = _cwry_label_col(ws)
+
+    # Currency detection — Twinco is typically USD-denominated
+    fx, currency = 1.0, "USD"
+    for r in range(1, 20):
+        v = str(ws.cell(r, lc).value or "").lower()
+        if "eur" in v or "euro" in v:
+            currency = "EUR"
+            break
+        if "gbp" in v:
+            currency = "GBP"
+            break
+
+    def _find(*labels, exact=False):
+        return _first_row(*labels, ws=ws, label_col=lc, exact=exact)
+
+    row_rev = _find(
+        "total revenue", "revenue", "net revenue", "total net revenue",
+        "revenues", "total revenues", "financing income", "total financing income",
+        "interest income", "income",
+    )
+    row_gp = _find("gross profit", "gross income", "net interest income")
+    row_gm = _find(
+        "gross margin %", "gross margin pct", "gross margin percentage",
+        "gross profit margin", "gross profit margin %", "gross profit %",
+        "gross margin",
+    )
+    row_ebt = (
+        _find("ebitda", exact=True)
+        or _find("adjusted ebitda", "total ebitda", "ebitda (loss)", "ebitda profit")
+        or _find("ebitda")
+    )
+    row_net = (
+        _find(
+            "net income", "net profit", "profit after tax", "pat",
+            "net profit/(loss)", "net income/(loss)", "net loss",
+            "profit/(loss) after tax",
+            exact=True,
+        )
+        or _find("net income", "net profit", "profit after tax")
+    )
+    # Volume financed — PO / SCF / transaction volume → stored in gmv_usd
+    row_vol = _find(
+        "volume financed", "total volume financed", "po volume", "po financed",
+        "purchase order volume", "purchase orders financed", "total po",
+        "volume of purchase orders", "financed volume", "total financed volume",
+        "transaction volume", "total transaction volume", "gmv",
+    )
+    row_ac = _find(
+        "active clients", "active buyers", "active suppliers", "active counterparties",
+        "number of clients", "total clients", "buyers", "suppliers",
+        "clients", "counterparties", "active companies",
+    )
+
+    if row_rev is None:
+        raise ValueError(
+            f"Cannot find a revenue row in sheet '{ws.title}' (label col {lc}). "
+            "Expected labels such as 'Revenue', 'Total Revenue', or 'Financing Income'."
+        )
+
+    date_cols = _cwry_date_cols(ws, lc)
+    if not date_cols:
+        raise ValueError(
+            f"No date columns found in sheet '{ws.title}'. "
+            "Expected month/year headers in rows 1–6."
+        )
+
+    results: list[dict] = []
+    for col, period in sorted(date_cols.items(), key=lambda x: x[1]):
+
+        def _g(row, _col=col):
+            return safe_float(ws.cell(row, _col).value) if row else None
+
+        rev_raw = _g(row_rev)
+        if not rev_raw:
+            continue
+
+        gp_raw  = _g(row_gp)
+        gm_raw  = _g(row_gm)
+        ebt_raw = _g(row_ebt)
+        net_raw = _g(row_net)
+        vol_raw = _g(row_vol)
+        ac_raw  = _g(row_ac)
+
+        rev_usd = round(rev_raw / fx, 2)
+
+        if gm_raw is not None:
+            gm_pct = round(gm_raw * 100, 4) if abs(gm_raw) <= 1.5 else round(float(gm_raw), 4)
+        elif gp_raw is not None:
+            gm_pct = round(gp_raw / rev_raw * 100, 4)
+        else:
+            gm_pct = None
+
+        ebt_usd = round(ebt_raw / fx, 2) if ebt_raw is not None else None
+        em_pct  = round(ebt_raw / rev_raw * 100, 4) if ebt_raw is not None else None
+
+        net_usd = round(net_raw / fx, 2) if net_raw is not None else None
+        nm_pct  = round(net_raw / rev_raw * 100, 4) if net_raw is not None else None
+
+        vol_usd = round(vol_raw / fx, 2) if vol_raw is not None else None
+
+        if results and results[-1].get("revenue_usd"):
+            prior = results[-1]["revenue_usd"]
+            rev_growth = round((rev_usd - prior) / prior * 100, 4) if prior > 0 else None
+        else:
+            rev_growth = None
+
+        results.append({
+            "period_end_date":      period,
+            "reporting_currency":   currency,
+            "fx_rate_to_usd":       fx,
+            "revenue_usd":          rev_usd,
+            "gross_margin_pct":     gm_pct,
+            "ebitda_usd":           ebt_usd,
+            "ebitda_margin_pct":    em_pct,
+            "net_income_usd":       net_usd,
+            "net_margin_pct":       nm_pct,
+            "gmv_usd":              vol_usd,
+            "active_clients_count": int(ac_raw) if ac_raw is not None else None,
+            "revenue_growth_pct":   rev_growth,
+        })
+
+    return results
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 PARSERS: dict[str, callable] = {
@@ -691,4 +834,6 @@ PARSERS: dict[str, callable] = {
     "VertoFX":   parse_verto,
     "MaxSoko":   parse_maxsoko,
     "Cowrywise": parse_cowrywise,
+    "Twinco":    parse_twinco,
+    "TWINCO":    parse_twinco,
 }
