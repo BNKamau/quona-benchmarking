@@ -6,6 +6,7 @@ import anthropic
 import os
 from datetime import datetime, timedelta, timezone
 from parsers.excel_parsers import PARSERS, SUPPORTED_COMPANIES
+import auth
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -6423,6 +6424,11 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
                 st.success("Actions saved.")
 
 
+# ── Authentication gate ───────────────────────────────────────────────────────
+if not auth.is_authenticated():
+    auth.render_login_page()
+    st.stop()
+
 # ── TEMPORARY DB DIAGNOSTIC (remove after confirming path) ───────────────────
 _db_debug_banner()
 # ── END DIAGNOSTIC ────────────────────────────────────────────────────────────
@@ -6431,6 +6437,8 @@ _db_debug_banner()
 if "page" not in st.session_state:
     st.session_state.page = "home"
     st.session_state.company_id = None
+
+auth.render_user_sidebar()
 
 # ── Persistent header ─────────────────────────────────────────────────────────
 st.markdown(f"""
