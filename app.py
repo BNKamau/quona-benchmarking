@@ -6,7 +6,6 @@ import anthropic
 import os
 from datetime import datetime, timedelta, timezone
 from parsers.excel_parsers import PARSERS, SUPPORTED_COMPANIES
-import auth
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -6425,8 +6424,13 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
 
 
 # ── Authentication gate ───────────────────────────────────────────────────────
-if not auth.is_authenticated():
-    auth.render_login_page()
+if not st.experimental_user.is_logged_in:
+    st.login()
+    st.stop()
+
+if not st.experimental_user.email.endswith("@quona.com"):
+    st.error("Access restricted to @quona.com accounts.")
+    st.logout()
     st.stop()
 
 # ── TEMPORARY DB DIAGNOSTIC (remove after confirming path) ───────────────────
@@ -6438,7 +6442,9 @@ if "page" not in st.session_state:
     st.session_state.page = "home"
     st.session_state.company_id = None
 
-auth.render_user_sidebar()
+st.sidebar.write(f"Signed in as {st.experimental_user.email}")
+if st.sidebar.button("Sign out"):
+    st.logout()
 
 # ── Persistent header ─────────────────────────────────────────────────────────
 st.markdown(f"""
