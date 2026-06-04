@@ -561,9 +561,11 @@ def load_stage_snapshots(comp_ids: tuple) -> pd.DataFrame:
         FROM comp_stage_snapshots WHERE comp_id IN ({ph})
     """, _comps_conn(), params=list(comp_ids))
 
-@st.cache_data(ttl=600)
 def load_companies(db_version: str = "") -> pd.DataFrame:
-    return pd.read_sql_query("""
+    _key = "_ws_companies"
+    if _key in st.session_state:
+        return st.session_state[_key]
+    result = pd.read_sql_query("""
         SELECT c.id, c.name, c.sector, c.hq_country, c.founded_year, c.fund,
                k.revenue_usd,
                k.ebitda_usd,
@@ -591,10 +593,14 @@ def load_companies(db_version: str = "") -> pd.DataFrame:
             )
         ORDER BY c.name
     """, _conn())
+    st.session_state[_key] = result
+    return result
 
-@st.cache_data(ttl=300)
 def load_revenue_growth(db_version: str = "") -> pd.DataFrame:
-    return pd.read_sql_query("""
+    _key = "_ws_revenue_growth"
+    if _key in st.session_state:
+        return st.session_state[_key]
+    result = pd.read_sql_query("""
         WITH ranked AS (
             SELECT company_id, revenue_usd, period_end_date,
                    ROW_NUMBER() OVER (
@@ -614,8 +620,9 @@ def load_revenue_growth(db_version: str = "") -> pd.DataFrame:
             ON r1.company_id = r2.company_id AND r2.rn = 2
         WHERE r1.rn = 1
     """, _conn())
+    st.session_state[_key] = result
+    return result
 
-@st.cache_data(ttl=300)
 def load_ltm_revenue(db_version: str = "") -> pd.DataFrame:
     """
     LTM (last 12 months) or ARR-estimated revenue per company.
@@ -624,6 +631,9 @@ def load_ltm_revenue(db_version: str = "") -> pd.DataFrame:
     - Annual reporters: last annual figure
     - If insufficient history: annualise available data, label 'ARR (est.)'
     """
+    _key = "_ws_ltm_revenue"
+    if _key in st.session_state:
+        return st.session_state[_key]
     conn = _conn()
 
     periods = pd.read_sql_query("""
@@ -746,11 +756,15 @@ def load_ltm_revenue(db_version: str = "") -> pd.DataFrame:
                             "ltm_ebitda_usd": None, "ltm_ebitda_margin_pct": None,
                             "ltm_gross_margin_pct": ltm_gross_margin_pct})
 
-    return pd.DataFrame(results)
+    result = pd.DataFrame(results)
+    st.session_state["_ws_ltm_revenue"] = result
+    return result
 
-@st.cache_data(ttl=300)
 def load_ltm_volume(db_version: str = "") -> pd.DataFrame:
     """Compute LTM TPV and GMV per company using Python instead of SQL window functions."""
+    _key = "_ws_ltm_volume"
+    if _key in st.session_state:
+        return st.session_state[_key]
     query = """
         SELECT company_id, tpv_usd, gmv_usd, period_end_date
         FROM kpi_snapshots
@@ -768,27 +782,39 @@ def load_ltm_volume(db_version: str = "") -> pd.DataFrame:
             'ltm_gmv_usd': last_12['gmv_usd'].sum() if last_12['gmv_usd'].notna().any() else None,
         })
 
-    return pd.DataFrame(results) if results else pd.DataFrame(columns=['id', 'ltm_tpv_usd', 'ltm_gmv_usd'])
+    result = pd.DataFrame(results) if results else pd.DataFrame(columns=['id', 'ltm_tpv_usd', 'ltm_gmv_usd'])
+    st.session_state[_key] = result
+    return result
 
-@st.cache_data(ttl=300)
 def load_all_revenue(db_version: str = "") -> pd.DataFrame:
-    return pd.read_sql_query("""
+    _key = "_ws_all_revenue"
+    if _key in st.session_state:
+        return st.session_state[_key]
+    result = pd.read_sql_query("""
         SELECT company_id AS id, period_end_date, revenue_usd
         FROM kpi_snapshots
         WHERE revenue_usd IS NOT NULL
         ORDER BY id, period_end_date
     """, _conn())
+    st.session_state[_key] = result
+    return result
 
-@st.cache_data(ttl=300)
 def load_company_info(company_id: int, db_version: str = "") -> pd.Series:
+    _key = f"_ws_company_info_{company_id}"
+    if _key in st.session_state:
+        return st.session_state[_key]
     df = pd.read_sql_query(
         "SELECT * FROM companies WHERE id = ?", _conn(), params=(company_id,)
     )
-    return df.iloc[0]
+    result = df.iloc[0]
+    st.session_state[_key] = result
+    return result
 
-@st.cache_data(ttl=300)
 def load_kpis(company_id: int, db_version: str = "") -> pd.DataFrame:
-    print(f"[load_kpis] DB={DB_PATH} company_id={company_id} db_version={db_version!r}")
+    _key = f"_ws_kpis_{company_id}"
+    if _key in st.session_state:
+        return st.session_state[_key]
+    print(f"[load_kpis] DB={DB_PATH} company_id={company_id}")
     conn = _conn()
     try:
         df = pd.read_sql_query("""
@@ -847,6 +873,7 @@ def load_kpis(company_id: int, db_version: str = "") -> pd.DataFrame:
             .round(4)
         )
 
+    st.session_state[f"_ws_kpis_{company_id}"] = df
     return df
 
 
@@ -870,26 +897,10 @@ def _kpi_last_updated(company_id: int) -> str:
         return ts
 
 def _kpi_db_version(company_id: int) -> str:
-    """Raw MAX(updated_at) for one company — used as a @st.cache_data key."""
-    conn = _conn()
-    try:
-        row = conn.execute(
-            "SELECT MAX(updated_at) FROM kpi_snapshots WHERE company_id=?",
-            (company_id,),
-        ).fetchone()
-    finally:
-        conn.close()
-    return str(row[0]) if (row and row[0]) else "none"
-
+    return ""  # session state warm cache handles invalidation
 
 def _db_global_version() -> str:
-    """Raw MAX(updated_at) across ALL kpi_snapshots — used as a @st.cache_data key."""
-    conn = _conn()
-    try:
-        row = conn.execute("SELECT MAX(updated_at) FROM kpi_snapshots").fetchone()
-    finally:
-        conn.close()
-    return str(row[0]) if (row and row[0]) else "none"
+    return ""  # session state warm cache handles invalidation
 
 
 @st.cache_data(ttl=300)
@@ -921,6 +932,29 @@ def _ipo_readiness_save(company_id: int, updates: dict) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def _warm_cache() -> None:
+    """Pre-load all KPI tables into st.session_state once per session.
+
+    Called on every render but exits immediately after the first successful
+    warm. Subsequent calls are a single dict lookup — no Turso round trips.
+    To force a reload after a write, delete the _ws_* keys and set
+    _cache_warmed = False before calling st.rerun().
+    """
+    if st.session_state.get("_cache_warmed"):
+        return
+    load_companies()
+    load_revenue_growth()
+    load_ltm_revenue()
+    load_ltm_volume()
+    load_all_revenue()
+    companies_df = st.session_state.get("_ws_companies", pd.DataFrame())
+    for cid in companies_df["id"].tolist():
+        cid = int(cid)
+        load_company_info(cid)
+        load_kpis(cid)
+    st.session_state["_cache_warmed"] = True
 
 
 # ── Formatters ─────────────────────────────────────────────────────────────────
@@ -3315,6 +3349,9 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
         st.session_state[f"upload_db_path_{company_id}"]     = DB_PATH
         st.session_state[f"upload_row_count_{company_id}"]   = _vcount
         st.session_state.pop(ss_fkey, None)
+        for _k in [k for k in st.session_state if k.startswith("_ws_")]:
+            del st.session_state[_k]
+        st.session_state["_cache_warmed"] = False
         st.cache_data.clear()
         st.rerun()
 
@@ -7904,6 +7941,8 @@ _db_debug_banner()
 if "page" not in st.session_state:
     st.session_state.page = "home"
     st.session_state.company_id = None
+
+_warm_cache()
 
 # ── Persistent header ─────────────────────────────────────────────────────────
 st.markdown(f"""
