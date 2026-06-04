@@ -21,7 +21,12 @@
       "Bash(git commit -m ' *)",
       "Bash(sqlite3 benchmarking.db \"SELECT id, name FROM companies ORDER BY name;\")",
       "Bash(git commit *)",
-      "Bash(git check-ignore *)"
+      "Bash(git check-ignore *)",
+      "Bash(git rm *)",
+      "Bash(PowerShell *)",
+      "WebSearch",
+      "WebFetch(domain:docs.streamlit.io)",
+      "Bash(python3 *)"
     ]
   }
 }

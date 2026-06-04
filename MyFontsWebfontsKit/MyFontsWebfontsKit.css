@@ -1,0 +1,42 @@
+/**
+ * @license
+ * MyFonts Webfont Build ID 4101198, 2021-06-10T11:32:57-0400
+ * 
+ * The fonts listed in this notice are subject to the End User License
+ * Agreement(s) entered into by the website owner. All other parties are 
+ * explicitly restricted from using the Licensed Webfonts(s).
+ * 
+ * You may obtain a valid license at the URLs below.
+ * 
+ * Webfont: Sombra-Regular by TypeMates
+ * URL: https://www.myfonts.com/fonts/typemates/sombra/regular/
+ * 
+ * Webfont: Sombra-Bold by TypeMates
+ * URL: https://www.myfonts.com/fonts/typemates/sombra/bold/
+ * 
+ * Webfont: Sombra-Black by TypeMates
+ * URL: https://www.myfonts.com/fonts/typemates/sombra/black/
+ * 
+ * 
+ * Webfonts copyright: Copyright © 2020 by Paul Eslage, under exclusive license to TypeMates. All rights reserved.
+ * 
+ * © 2021 MyFonts Inc
+*/
+
+
+/* @import must be at top of file, otherwise CSS will not work */
+@import url("//hello.myfonts.net/count/3e944e");
+  
+@font-face {
+  font-family: "Sombra-Black";
+  src: url('webFonts/SombraBlack/font.woff2') format('woff2'), url('webFonts/SombraBlack/font.woff') format('woff');
+}
+@font-face {
+  font-family: "Sombra-Bold";
+  src: url('webFonts/SombraBold/font.woff2') format('woff2'), url('webFonts/SombraBold/font.woff') format('woff');
+}
+@font-face {
+  font-family: "Sombra-Regular";
+  src: url('webFonts/SombraRegular/font.woff2') format('woff2'), url('webFonts/SombraRegular/font.woff') format('woff');
+}
+
