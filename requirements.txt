@@ -4,3 +4,4 @@ pandas
 openpyxl
 anthropic
 requests
+# libsql-experimental>=0.3.0  # optional: uncomment if building on Linux with Rust toolchain

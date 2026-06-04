@@ -1,11 +1,166 @@
 import streamlit as st
 import sqlite3
+import base64 as _b64
 import pandas as pd
 import plotly.graph_objects as go
 import anthropic
 import os
 from datetime import datetime, timedelta, timezone
 from parsers.excel_parsers import PARSERS, SUPPORTED_COMPANIES
+
+# ── Turso HTTP connection (replaces libsql; no native compilation needed) ─────
+class _TursoHTTPCursor:
+    """Minimal DBAPI2-compatible cursor backed by the Turso HTTP pipeline API."""
+
+    def __init__(self, http_url, token):
+        self._url   = http_url
+        self._token = token
+        self.description = None
+        self.rowcount    = -1
+        self._rows: list = []
+        self._pos        = 0
+
+    @staticmethod
+    def _encode_arg(val):
+        if val is None:
+            return {"type": "null", "value": None}
+        if isinstance(val, bool):
+            return {"type": "integer", "value": "1" if val else "0"}
+        if isinstance(val, int):
+            return {"type": "integer", "value": str(val)}
+        if isinstance(val, float):
+            return {"type": "float", "value": val}
+        if isinstance(val, bytes):
+            return {"type": "blob", "base64": _b64.b64encode(val).decode()}
+        return {"type": "text", "value": str(val)}
+
+    @staticmethod
+    def _decode_val(cell):
+        t = cell.get("type")
+        v = cell.get("value")
+        if t == "null" or v is None:
+            return None
+        if t == "integer":
+            return int(v)
+        if t == "float":
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return v
+        if t == "blob":
+            return _b64.b64decode(cell.get("base64", ""))
+        return v
+
+    def _pipeline(self, stmts):
+        import requests as _req
+        payload = [{"type": "execute", "stmt": s} for s in stmts] + [{"type": "close"}]
+        resp = _req.post(
+            self._url,
+            headers={"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"},
+            json={"requests": payload},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json().get("results", [])
+
+    def execute(self, sql, parameters=None):
+        stmt: dict = {"sql": sql}
+        if parameters:
+            stmt["args"] = [self._encode_arg(p) for p in parameters]
+        results = self._pipeline([stmt])
+        r = results[0]
+        if r.get("type") == "error":
+            raise Exception(r["error"]["message"])
+        res = r["response"]["result"]
+        cols = res.get("cols", [])
+        self.description = (
+            [(c["name"], None, None, None, None, None, None) for c in cols] if cols else None
+        )
+        self._rows = [
+            tuple(self._decode_val(cell) for cell in row)
+            for row in res.get("rows", [])
+        ]
+        self.rowcount = res.get("affected_row_count", len(self._rows))
+        self._pos = 0
+        return self
+
+    def fetchall(self):
+        rows = self._rows[self._pos:]
+        self._pos = len(self._rows)
+        return rows
+
+    def fetchone(self):
+        if self._pos >= len(self._rows):
+            return None
+        row = self._rows[self._pos]
+        self._pos += 1
+        return row
+
+    def fetchmany(self, size=1000):
+        rows = self._rows[self._pos:self._pos + size]
+        self._pos += len(rows)
+        return rows
+
+    def close(self):
+        pass
+
+    def __iter__(self):
+        return iter(self._rows[self._pos:])
+
+
+class _TursoHTTPConnection:
+    """Minimal DBAPI2-compatible connection backed by the Turso HTTP pipeline API.
+
+    Drop-in replacement for sqlite3.connect() — supports execute(), cursor(),
+    commit() (no-op; Turso auto-commits), close(), and the context manager protocol.
+    Compatible with pandas.read_sql_query().
+    """
+
+    def __init__(self, db_url: str, token: str):
+        # Accept both libsql:// and https:// URL schemes
+        self._http_url = db_url.replace("libsql://", "https://") + "/v2/pipeline"
+        self._token    = token
+
+    def cursor(self):
+        return _TursoHTTPCursor(self._http_url, self._token)
+
+    def execute(self, sql, parameters=None):
+        cur = self.cursor()
+        cur.execute(sql, parameters)
+        return cur
+
+    def executemany(self, sql, seq_of_parameters):
+        import requests as _req
+        stmts = [
+            {"sql": sql, "args": [_TursoHTTPCursor._encode_arg(p) for p in params]}
+            for params in seq_of_parameters
+        ]
+        if not stmts:
+            return
+        # Batch into chunks to stay within Turso pipeline limits
+        for i in range(0, len(stmts), 50):
+            chunk   = stmts[i:i + 50]
+            payload = [{"type": "execute", "stmt": s} for s in chunk] + [{"type": "close"}]
+            resp = _req.post(
+                self._http_url,
+                headers={"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"},
+                json={"requests": payload},
+                timeout=60,
+            )
+            resp.raise_for_status()
+
+    def commit(self):
+        pass  # Turso HTTP API auto-commits each pipeline
+
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        pass
+
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -138,6 +293,12 @@ _HERE    = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(_HERE, "benchmarking.db")
 
 def _conn():
+    """Return a connection to the benchmarking database.
+    Uses Turso when secrets are present; falls back to local SQLite for development."""
+    turso_url   = st.secrets.get("TURSO_BENCHMARKING_URL", "")
+    turso_token = st.secrets.get("TURSO_BENCHMARKING_TOKEN", "")
+    if turso_url and turso_token:
+        return _TursoHTTPConnection(turso_url, turso_token)
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
@@ -336,7 +497,7 @@ _init_db()
 # ── TEMPORARY DB DIAGNOSTIC — remove after confirming path ────────────────────
 def _db_debug_banner():
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _conn()
         n_kpi = conn.execute("SELECT COUNT(*) FROM kpi_snapshots").fetchone()[0]
         n_co  = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
         conn.close()
@@ -354,6 +515,12 @@ COMPS_DB = os.path.join(_HERE, "data", "quona_exit_comps.db")
 _COMP_NAME_MAP = {"VertoFX": "Verto FX"}  # benchmarking.db name → portfolio_comp_mapping name
 
 def _comps_conn():
+    """Return a connection to the exit comps database.
+    Uses Turso when secrets are present; falls back to local SQLite for development."""
+    turso_url   = st.secrets.get("TURSO_COMPS_URL", "")
+    turso_token = st.secrets.get("TURSO_COMPS_TOKEN", "")
+    if turso_url and turso_token:
+        return _TursoHTTPConnection(turso_url, turso_token)
     return sqlite3.connect(COMPS_DB, check_same_thread=False)
 
 @st.cache_data(ttl=300)
@@ -2551,9 +2718,7 @@ def render_benchmarking_tab(
                                 )
                             if st.form_submit_button("Insert into exit_comps"):
                                 try:
-                                    _conn_comps = sqlite3.connect(
-                                        "data/quona_exit_comps.db", check_same_thread=False
-                                    )
+                                    _conn_comps = _comps_conn()
                                     now_iso = datetime.utcnow().isoformat()
                                     _conn_comps.execute(
                                         """INSERT INTO exit_comps

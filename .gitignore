@@ -1,3 +1,7 @@
+# SQLite databases (data lives in Turso cloud; local files are dev-only)
+benchmarking.db
+data/quona_exit_comps.db
+
 # SQLite WAL/SHM transient files — never commit these
 benchmarking.db-wal
 benchmarking.db-shm
