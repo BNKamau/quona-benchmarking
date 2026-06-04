@@ -3835,6 +3835,58 @@ def _render_cowrywise_exit_tab() -> None:
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
+    # ── Section 3: Next Steps Generator ──────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 4px 0;letter-spacing:.3px'>Next Steps Generator</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:14px'>"
+        "Tick buyers to re-engage above, then generate a prioritized outreach plan.</div>",
+        unsafe_allow_html=True,
+    )
+
+    _BUYER_ACTIONS = {
+        "Moniepoint":         "Escalate founder-to-founder conversation to M&A track. Frame Cowrywise's 1M+ user wealth platform as the savings and investment layer Moniepoint's SME ecosystem lacks.",
+        "Flutterwave":        "Approach via shared investor network. Frame Cowrywise as completing Flutterwave's consumer fintech stack alongside payments — mirrors their Mono acquisition logic.",
+        "GTBank / HabariPay": "Engage HabariPay leadership directly. Cowrywise's SEC licence and 1M+ users gives GTBank instant digital investment distribution without regulatory re-build.",
+        "Stanbic IBTC":       "Approach via Quona board network. Direct overlap — Cowrywise's digital wealth platform accelerates Stanbic's mass-market investment distribution.",
+        "PiggyVest":          "Initiate consolidation conversation via Cowrywise CEO. Combined platform would create Nigeria's dominant retail savings and investment brand.",
+        "KKR":                "Continue active dialogue — highest near-term conviction buyer. Prepare investor materials for Global Impact strategy review.",
+        "IFC":                "Re-engage via Quona's IFC relationship. Frame as DFI financing or equity stake aligned with IFC's financial inclusion mandate.",
+        "Old Mutual":         "Approach Old Mutual Ventures Africa. Cowrywise's Nigerian platform gives Old Mutual instant retail investment distribution without regulatory build-out.",
+        "Sanlam":             "Engage Sanlam Nigeria strategy team. Frame as accelerating their savings and insurance cross-sell via Cowrywise's digital-first distribution.",
+        "Franklin Templeton":  "Approach via fund distribution partnership — convert to equity stake conversation once ARR exceeds $20M.",
+        "Alphacode":          "Approach via RMI/FNB connections. Frame as bridging Cowrywise to a local bank acquirer — Alphacode's portfolio relationships are the natural path.",
+        "Partech":            "Flag for Partech's second Africa fund mandate — Cowrywise at $20M ARR is exactly the growth-stage asset they are targeting.",
+        "Norrsken22":         "Approach as a secondary or bridge investment ahead of strategic sale — Cowrywise adds Nigeria wealthtech exposure to a portfolio concentrated in SA.",
+    }
+    _ALL_BUYERS = [b[0] for b in local_buyers] + [b[0] for b in global_buyers] + [b[0] for b in secondaries_buyers]
+
+    if st.button("Generate Exit Actions for Cowrywise"):
+        ticked = [
+            name for name in _ALL_BUYERS
+            if st.session_state.get("engage_cowrywise_" + name.replace(" ", "").replace("/", ""), False)
+            or st.session_state.get("engage_cowrywise_sec_" + name.replace(" ", "").replace("/", ""), False)
+        ]
+        st.markdown("#### Strategic Acquisition Outreach")
+        if ticked:
+            for name in ticked:
+                action = _BUYER_ACTIONS.get(name, f"Schedule introductory strategic conversation with {name} via Quona network.")
+                st.markdown(
+                    f"<div style='padding:10px 14px;margin-bottom:8px;background:#FFFFFF;"
+                    f"border:1px solid #D4D5CE;border-radius:8px'>"
+                    f"<span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"<span style='color:#2C2C2A;margin-left:10px'>{action}</span></div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown(
+                f"<div style='color:{MUTED};font-size:13px'>Tick at least one buyer above to generate actions.</div>",
+                unsafe_allow_html=True,
+            )
+
 
 # ── VertoFX custom exit tab ──────────────────────────────────────────────────
 
@@ -4208,6 +4260,58 @@ def _render_vertofx_exit_tab() -> None:
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
+    # ── Section 3: Next Steps Generator ──────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 4px 0;letter-spacing:.3px'>Next Steps Generator</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:14px'>"
+        "Tick buyers to re-engage above, then generate a prioritized outreach plan.</div>",
+        unsafe_allow_html=True,
+    )
+
+    _BUYER_ACTIONS = {
+        "Standard Bank / Stanbic": "Engage Standard Bank CIB leadership via Quona network. Frame Verto as reducing correspondent banking costs and deepening SME trade finance across 20+ African markets.",
+        "Access Bank":             "Approach Access Bank's digital banking team. Verto's multi-currency rails and UAE corridor directly support Access Bank's diaspora and pan-African trade strategy.",
+        "Ecobank":                 "Engage via Quona's West Africa network. Frame Verto as deepening intra-African trade payment infrastructure across Ecobank's 35-country footprint.",
+        "FirstBank Nigeria":       "Approach via existing Quona-FirstBank relationship. Verto's FX infrastructure could power FirstBank's B2B cross-border offering for Nigerian corporate clients.",
+        "Corpay":                  "Approach via investment banking intermediary. Verto's Africa and EM corridor coverage fills the most critical gap in Corpay's global B2B FX footprint.",
+        "Nium":                    "Escalate existing corridor partnership conversation to M&A track. Verto's $25B+ annual volume and licensed EM infrastructure materially accelerates Nium's Africa expansion.",
+        "Thunes":                  "Approach via shared investor network. Verto's B2B FX treasury tools complement Thunes' cross-border payout network with enterprise-grade supply side.",
+        "Airwallex":               "Approach via Airwallex's UAE expansion team. Verto's DFSA licence and Africa corridor expertise are directly additive to Airwallex's Gulf build-out.",
+        "Mastercard":              "Escalate Mastercard partnership conversation to strategic M&A review. Verto's enterprise infrastructure aligns with Mastercard's B2B payments and trade finance agenda.",
+        "Wise":                    "Approach Wise Business development team. Verto's EM frontier corridor specialisation plugs the gap in Wise Business's B2B expansion into Africa.",
+        "Partech":                 "Flag for Partech's second Africa fund — Verto is exactly the de-risked B2B fintech with enterprise clients they are seeking.",
+        "Norrsken22":              "Approach as a secondary or bridge investment. Verto deepens Norrsken's Africa B2B payments exposure in a segment they don't yet cover.",
+        "Blue Earth Capital":      "Assess impact narrative strengthening before outreach — Verto's financial inclusion angle needs to be front and centre for Blue Earth.",
+    }
+    _ALL_BUYERS = [b[0] for b in local_buyers] + [b[0] for b in global_buyers] + [b[0] for b in secondaries_buyers]
+
+    if st.button("Generate Exit Actions for VertoFX"):
+        ticked = [
+            name for name in _ALL_BUYERS
+            if st.session_state.get("engage_vertofx_" + name.replace(" ", "").replace("/", ""), False)
+            or st.session_state.get("engage_vertofx_sec_" + name.replace(" ", "").replace("/", ""), False)
+        ]
+        st.markdown("#### Strategic Acquisition Outreach")
+        if ticked:
+            for name in ticked:
+                action = _BUYER_ACTIONS.get(name, f"Schedule introductory strategic conversation with {name} via Quona network.")
+                st.markdown(
+                    f"<div style='padding:10px 14px;margin-bottom:8px;background:#FFFFFF;"
+                    f"border:1px solid #D4D5CE;border-radius:8px'>"
+                    f"<span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"<span style='color:#2C2C2A;margin-left:10px'>{action}</span></div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown(
+                f"<div style='color:{MUTED};font-size:13px'>Tick at least one buyer above to generate actions.</div>",
+                unsafe_allow_html=True,
+            )
+
 
 # ── Lulalend custom exit tab ─────────────────────────────────────────────────
 
@@ -4566,6 +4670,58 @@ def _render_lulalend_exit_tab() -> None:
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
+    # ── Section 4: Next Steps Generator ──────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 4px 0;letter-spacing:.3px'>Next Steps Generator</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:14px'>"
+        "Tick buyers to re-engage above, then generate a prioritized outreach plan.</div>",
+        unsafe_allow_html=True,
+    )
+
+    _BUYER_ACTIONS = {
+        "FirstRand / RMB":   "Engage RMB corporate finance team — RfP already issued. Prepare vendor due diligence pack and term sheet response.",
+        "Vodacom":           "Re-engage VodaLend partnership team at M&A level. Acquiring Lula internalises all VodaLend economics — frame as the natural next step.",
+        "Capitec":           "Request meeting with Capitec SME banking lead. Lula's underwriting models and 110k+ active borrowers are the fastest path to Capitec SME credit scale.",
+        "TymeBank":          "Approach TymeBank CEO directly. Second SME lending acquisition post-Retail Capital is consistent with their full-stack SME strategy.",
+        "Revolut":           "Approach Revolut SA launch team. Lula provides a turnkey licensed SME lending platform for Revolut's SA market entry.",
+        "Nubank":            "Approach via TymeBank board relationship. Lula's credit DNA and SA footprint align with Nubank's low-cost digital credit model and Africa expansion.",
+        "Experian":          "Re-engage Experian ExperiFin team. Lula's lending data enriches Experian's SME credit bureau — convert data partnership to deeper strategic conversation.",
+        "Moniepoint":        "Approach Moniepoint expansion team. Lula provides instant SA SME foothold aligned with Moniepoint's pan-African SME-first model.",
+        "Prosus":            "Flag for Prosus African fintech thesis — Lula fits their PayU SME rails bundling strategy. Approach via PayU SA relationship.",
+        "Blue Earth Capital":"Warm intro via Quona's Blue Earth relationship. Lula is a de-risked SA SME lending asset with clear secondaries market appeal.",
+        "Alphacode":         "Approach via RMI/FNB connections — natural bridge to a local bank exit. Alphacode's portfolio relationships are the most efficient path.",
+        "Norrsken22":        "Flag as bridge investment ahead of strategic sale — Lula adds de-risked SA fintech exposure to a portfolio thin on lending assets.",
+        "Partech":           "Approach Partech's second Africa fund team. Lula at Series C stage with leading SA SME lender position is exactly their mandate.",
+    }
+    _ALL_BUYERS = [b[0] for b in local_buyers] + [b[0] for b in global_buyers] + [b[0] for b in secondaries_buyers]
+
+    if st.button("Generate Exit Actions for Lulalend"):
+        ticked = [
+            name for name in _ALL_BUYERS
+            if st.session_state.get("engage_lulalend_" + name.replace(" ", ""), False)
+            or st.session_state.get("engage_lulalend_sec_" + name.replace(" ", ""), False)
+        ]
+        st.markdown("#### Strategic Acquisition Outreach")
+        if ticked:
+            for name in ticked:
+                action = _BUYER_ACTIONS.get(name, f"Schedule introductory strategic conversation with {name} via Quona network.")
+                st.markdown(
+                    f"<div style='padding:10px 14px;margin-bottom:8px;background:#FFFFFF;"
+                    f"border:1px solid #D4D5CE;border-radius:8px'>"
+                    f"<span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"<span style='color:#2C2C2A;margin-left:10px'>{action}</span></div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown(
+                f"<div style='color:{MUTED};font-size:13px'>Tick at least one buyer above to generate actions.</div>",
+                unsafe_allow_html=True,
+            )
+
 
 # ── Yoco custom exit tab ──────────────────────────────────────────────────────
 
@@ -4618,7 +4774,93 @@ def _render_yoco_exit_tab() -> None:
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
-    # ── Section 2: Acquirer Universe ─────────────────────────────────────────
+    # ── Section 2: Implied Valuation Range ───────────────────────────────────
+    _yoco_id_row = pd.read_sql_query(
+        "SELECT id FROM companies WHERE name = 'Yoco' LIMIT 1", _conn()
+    )
+    _yoco_ltm = None
+    if not _yoco_id_row.empty:
+        _yoco_id = int(_yoco_id_row.iloc[0]["id"])
+        _ltm_df  = load_ltm_revenue(db_version=_db_global_version())
+        _vrow    = _ltm_df[_ltm_df["id"] == _yoco_id]
+        if not _vrow.empty and _vrow.iloc[0]["ltm_revenue"] is not None:
+            _yoco_ltm = float(_vrow.iloc[0]["ltm_revenue"])
+
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 6px 0;letter-spacing:.3px'>Implied Valuation Range</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:16px'>"
+        f"Based on SA payments M&A comps (iKhokha, Peach Payments) and strategic premium for SARB-licensed merchant base. "
+        f"LTM Revenue: {fmt_usd(_yoco_ltm)}</div>",
+        unsafe_allow_html=True,
+    )
+
+    _HDR_Y = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px"
+    )
+    _yhcols = st.columns([2, 1, 1, 1, 2])
+    for _hc, _lbl in zip(_yhcols, ["Pathway", "Multiple", "Low Case", "Base Case", "High Case"]):
+        with _hc:
+            st.markdown(f"<div style='{_HDR_Y}'>{_lbl}</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='height:2px;background:{BORDER};margin:6px 0 10px'></div>",
+        unsafe_allow_html=True,
+    )
+
+    def _yval_row(pathway_name, tag, tag_bg, tag_fg, multiple_lbl, low, base, high, base_color, note):
+        cols = st.columns([2, 1, 1, 1, 2])
+        with cols[0]:
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:700;color:{BLACK};padding-top:4px'>"
+                f"{pathway_name}</div>"
+                f"<span style='font-size:11px;font-weight:600;background:{tag_bg};color:{tag_fg};"
+                f"border-radius:4px;padding:2px 7px'>{tag}</span>",
+                unsafe_allow_html=True,
+            )
+        with cols[1]:
+            st.markdown(f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{multiple_lbl}</div>", unsafe_allow_html=True)
+        with cols[2]:
+            st.markdown(f"<div style='font-size:14px;color:{BLACK};padding-top:6px'>{fmt_usd(low)}</div>", unsafe_allow_html=True)
+        with cols[3]:
+            st.markdown(f"<div style='font-size:14px;font-weight:700;color:{base_color};padding-top:6px'>{fmt_usd(base)}</div>", unsafe_allow_html=True)
+        with cols[4]:
+            st.markdown(f"<div style='font-size:14px;color:{MUTED};padding-top:6px'>Up to {fmt_usd(high)}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='font-size:11px;color:{MUTED};font-style:italic;margin:4px 0 8px'>{note}</div>", unsafe_allow_html=True)
+        st.markdown(f"<hr style='border-color:{BORDER};margin:8px 0'>", unsafe_allow_html=True)
+
+    _yr = _yoco_ltm or 0
+    _yval_row("Strategic Sale Local", "Most likely — 12–24 months", GREEN, BLACK, "2–4x Revenue",
+              _yr * 2, _yr * 3, _yr * 4, "#2E7D32",
+              "iKhokha acquired by MTN at ~4x revenue ($94M at 4–5x ARR). Peach Payments (Mastercard, 2023) at ~3x. "
+              "SA bank/telco deals capped below $400M — Vodacom and Capitec are highest-conviction buyers.")
+    _yval_row("SME Bank Build (w/ SAVA)", "Execution dependent", BLUE, "#1565C0", "3–5x Revenue",
+              _yr * 3, _yr * 4, _yr * 5, "#1565C0",
+              "Yoco + SAVA banking licence creates SA's first full-stack SME challenger bank — commands a premium to a standalone payments exit. "
+              "Requires 12–18 months to execute before exit.")
+    _yval_row("Strategic Sale Global", "Low feasibility", "#D4D5CE", BLACK, "5–8x Revenue",
+              _yr * 5, _yr * 6.5, _yr * 8, BLACK,
+              "Stripe, Adyen, or Nubank Africa market-entry acquisition at global SaaS multiples — requires EBITDA breakeven and pan-African narrative first.")
+    _yval_row("Remain Independent", "Unattractive near-term", "#D4D5CE", BLACK, "2–3x Revenue",
+              _yr * 2, _yr * 2.5, _yr * 3, BLACK,
+              "Secondary at modest multiple if strategic sale stalls — avoid unless no strategic process underway.")
+
+    st.markdown(
+        f"<div style='background:{BG};border-radius:8px;padding:12px 16px;"
+        f"font-size:11px;color:{MUTED};margin-top:8px'>"
+        f"Valuation ranges are indicative. Primary comps: iKhokha–MTN ($94M, ~4–5x revenue, 2023), "
+        f"Peach Payments–Mastercard (undisclosed, est. ~3x revenue, 2023), TymeBank–Retail Capital ($85–90M, ~2.5x revenue, 2022). "
+        f"Yoco's 110k+ active merchant base and approaching EBITDA breakeven are the key near-term value inflection points."
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 3: Acquirer Universe ─────────────────────────────────────────
     st.markdown(
         f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
         f"margin:20px 0 12px 0;letter-spacing:.3px'>Acquirer Universe — Prioritized</div>",
@@ -5222,13 +5464,13 @@ def _render_twinco_exit_tab() -> None:
                 st.markdown(f"<div style='{_HDR_STYLE}'>{lbl}</div>", unsafe_allow_html=True)
         st.markdown("<div style='height:2px;background:#EFF0EA;margin-bottom:8px'></div>", unsafe_allow_html=True)
 
-    tab_banks, tab_infra, tab_sec = st.tabs(["Strategic Banks", "Infrastructure Players", "Secondaries Buyers"])
-    with tab_banks:
+    tab_local, tab_global, tab_sec = st.tabs(["Strategic Banks", "Infrastructure Players", "Secondaries Buyers"])
+    with tab_local:
         _header_row()
         for idx, (name, fit, activity, rationale) in enumerate(strategic_banks):
             key = "engage_twinco_bank_" + name.replace(" ", "").replace("/", "")
             _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
-    with tab_infra:
+    with tab_global:
         _header_row()
         for idx, (name, fit, activity, rationale) in enumerate(infrastructure_players):
             key = "engage_twinco_infra_" + name.replace(" ", "").replace("/", "")
@@ -5240,6 +5482,59 @@ def _render_twinco_exit_tab() -> None:
             _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 3: Next Steps Generator ──────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 4px 0;letter-spacing:.3px'>Next Steps Generator</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:14px'>"
+        "Tick buyers to re-engage above, then generate a prioritized outreach plan.</div>",
+        unsafe_allow_html=True,
+    )
+
+    _BUYER_ACTIONS = {
+        "Banco Santander":     "Escalate securitisation relationship to M&A discussion. Santander already leads the €150M facility — frame as the natural ownership evolution of their PO finance infrastructure bet.",
+        "BBVA":                "Re-engage via BBVA Spark. BBVA's €50M debt facility signals conviction — convert to equity conversation via investment banking intermediary.",
+        "HSBC":                "Approach HSBC Trade Finance leadership. Twinco's PO finance capability fills the pre-invoice gap HSBC couldn't address via Demica — frame as completing their SCF stack.",
+        "Standard Chartered":  "Engage Standard Chartered's EM trade finance team. Twinco's EM supplier network across Latin America, Asia and Africa directly aligns with their corridor strategy.",
+        "JPMorgan":            "Approach via investment banking intermediary. JPMorgan's SCF platform at scale needs a PO finance layer — Twinco is the logical bolt-on.",
+        "FIS":                 "Most urgent outreach — FIS acquired Demica explicitly to lead SCF. Twinco is the pre-invoice layer Demica lacks. Engage FIS M&A team immediately post-Demica integration.",
+        "SAP / Taulia":        "Approach SAP Taulia's partnership team. Twinco has zero overlap with Taulia — position as completing SAP's working capital suite from PO to invoice to payment.",
+        "Mastercard":          "Escalate existing partnership conversation to M&A track. Twinco's EM supplier coverage and zero-loss underwriting strengthen Mastercard's B2B trade finance product.",
+        "Finastra":            "Flag for Finastra's SCF acquisition strategy. Twinco's PO finance technology extends Finastra into the pre-invoice production cycle.",
+        "Network International":"Approach via Brookfield relationship. Twinco's EM supplier footprint overlaps with Network International's Africa and MENA geographic expansion.",
+        "FMO":                 "FMO is already lead Series B investor — initiate acquisition conversation directly. FMO has precedent for taking full ownership of impact-aligned fintechs.",
+        "IFC":                 "Approach IFC's trade finance team. Twinco's $1.7T trade finance gap mandate and EM supplier focus aligns with IFC's financial inclusion mission.",
+        "Prosus":              "Flag for Prosus SCF portfolio team. Twinco fits their Mintifi pattern — geographic and product adjacency is strong for an EM SCF platform roll-up.",
+    }
+    _ALL_BUYERS = [b[0] for b in strategic_banks] + [b[0] for b in infrastructure_players] + [b[0] for b in secondaries_buyers]
+
+    if st.button("Generate Exit Actions for TWINCO"):
+        ticked = [
+            name for name in _ALL_BUYERS
+            if st.session_state.get("engage_twinco_bank_" + name.replace(" ", "").replace("/", ""), False)
+            or st.session_state.get("engage_twinco_infra_" + name.replace(" ", "").replace("/", ""), False)
+            or st.session_state.get("engage_twinco_sec_" + name.replace(" ", "").replace("/", ""), False)
+        ]
+        st.markdown("#### Strategic Acquisition Outreach")
+        if ticked:
+            for name in ticked:
+                action = _BUYER_ACTIONS.get(name, f"Schedule introductory strategic conversation with {name} via Quona network.")
+                st.markdown(
+                    f"<div style='padding:10px 14px;margin-bottom:8px;background:#FFFFFF;"
+                    f"border:1px solid #D4D5CE;border-radius:8px'>"
+                    f"<span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"<span style='color:#2C2C2A;margin-left:10px'>{action}</span></div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown(
+                f"<div style='color:{MUTED};font-size:13px'>Tick at least one buyer above to generate actions.</div>",
+                unsafe_allow_html=True,
+            )
 
 
 # ── MaxSoko custom exit tab ───────────────────────────────────────────────────
@@ -5486,14 +5781,14 @@ def _render_maxsoko_exit_tab() -> None:
             f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>"
         )
 
-    def _buyer_row(name, fit, activity, rationale, key, row_idx=0):
+    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0, affinity_override=None):
         row_bg = "#EFF0EA" if row_idx % 2 == 0 else "#FFFFFF"
         with st.container():
             st.markdown(
                 f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
                 unsafe_allow_html=True,
             )
-            cols = st.columns([2, 2, 3, 1])
+            cols = st.columns([2, 2, 3, 1, 2])
             with cols[0]:
                 st.markdown(
                     f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
@@ -5512,6 +5807,36 @@ def _render_maxsoko_exit_tab() -> None:
                 )
             with cols[3]:
                 st.checkbox("", key=key)
+            with cols[4]:
+                if affinity_override is not None:
+                    st.markdown(
+                        f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{affinity_override}</div>",
+                        unsafe_allow_html=True,
+                    )
+                elif affinity_cache is None:
+                    st.markdown(
+                        f"<div style='font-size:11px;color:{MUTED};padding-top:8px'>Sync Affinity above</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    note = affinity_cache.get(name)
+                    if note is None:
+                        st.markdown(
+                            f"<div style='font-size:11px;color:{MUTED};font-style:italic;padding-top:8px'>Not in Affinity</div>",
+                            unsafe_allow_html=True,
+                        )
+                    elif note.get("stale"):
+                        st.markdown(
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            unsafe_allow_html=True,
+                        )
             st.markdown("</div>", unsafe_allow_html=True)
 
     _HDR_STYLE = (
@@ -5520,8 +5845,8 @@ def _render_maxsoko_exit_tab() -> None:
     )
 
     def _header_row():
-        hcols  = st.columns([2, 2, 3, 1])
-        labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage Q3?"]
+        hcols  = st.columns([2, 2, 3, 1, 2])
+        labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage?", "Last Affinity Contact"]
         for hc, lbl in zip(hcols, labels):
             with hc:
                 st.markdown(f"<div style='{_HDR_STYLE}'>{lbl}</div>", unsafe_allow_html=True)
@@ -5569,26 +5894,96 @@ def _render_maxsoko_exit_tab() -> None:
          "Deep Egypt market knowledge and relationships make Algebra a credible bridge investor ahead of MaxSoko's regional scale-up"),
     ]
 
-    tab_reg, tab_global, tab_pe = st.tabs(["Regional Buyers", "Global Strategics", "PE / Growth Equity"])
-    with tab_reg:
+    affinity_cache = st.session_state.get("maxsoko_affinity_data")
+    _, _sync_btn_col = st.columns([6, 1])
+    with _sync_btn_col:
+        if st.button("Sync Affinity", key="maxsoko_affinity_sync"):
+            _api_key  = st.secrets.get("AFFINITY_API_KEY", "")
+            all_names = list(dict.fromkeys(
+                [b[0] for b in regional_buyers]
+                + [g[0] for g in global_strategics]
+                + [p[0] for p in pe_growth]
+            ))
+            with st.spinner("Fetching Affinity data for all buyers…"):
+                st.session_state["maxsoko_affinity_data"] = {
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    for bname in all_names
+                }
+            st.rerun()
+
+    tab_local, tab_global, tab_pe = st.tabs(["Regional Buyers", "Global Strategics", "PE / Growth Equity"])
+    with tab_local:
         _header_row()
         for idx, (name, fit, activity, rationale) in enumerate(regional_buyers):
             key = "engage_maxsoko_reg_" + name.replace(" ", "").replace("/", "").replace("(", "").replace(")", "")
-            _buyer_row(name, fit, activity, rationale, key, row_idx=idx)
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
     with tab_global:
         _header_row()
         for idx, (name, fit, activity, rationale) in enumerate(global_strategics):
             key = "engage_maxsoko_glob_" + name.replace(" ", "").replace("/", "").replace("(", "").replace(")", "")
-            _buyer_row(name, fit, activity, rationale, key, row_idx=idx)
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
     with tab_pe:
         _header_row()
         for idx, (name, fit, activity, rationale) in enumerate(pe_growth):
             key = "engage_maxsoko_pe_" + name.replace(" ", "").replace("/", "").replace("(", "").replace(")", "")
-            _buyer_row(name, fit, activity, rationale, key, row_idx=idx)
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
 
-    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
-    # ── Section 4: Saudi IPO Readiness Tracker ───────────────────────────────
+    # ── Section 4: Next Steps Generator ──────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 4px 0;letter-spacing:.3px'>Next Steps Generator</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:14px'>"
+        "Tick buyers to re-engage above, then generate a prioritized outreach plan.</div>",
+        unsafe_allow_html=True,
+    )
+
+    _BUYER_ACTIONS = {
+        "Bin Dawood Holding":         "Approach via Saudi investment banking intermediary. Frame MaxSoko's B2B FMCG distribution platform as filling Bin Dawood's digital supplier network gap and providing Egypt market entry.",
+        "Savola Group":               "Engage Savola strategy team. MaxSoko's Egypt and KSA retailer relationships and distribution data directly complement Savola's FMCG supply chain.",
+        "Fawry":                      "Approach via Quona's Egypt network. MaxSoko's embedded finance layer and retailer network are natural extensions of Fawry's SME payments expansion.",
+        "LuLu Group":                 "Engage LuLu Group digital procurement team. MaxSoko's B2B marketplace could power LuLu's supplier digitisation across Egypt and KSA.",
+        "AB InBev (BEES)":            "Approach via BEES global expansion team. MaxSoko's retailer data and FMCG distribution rails complement BEES's order-to-sellout data ambitions in Egypt and KSA.",
+        "Olam International":         "Engage Olam's digital trade platforms team. MaxSoko's B2B marketplace and embedded finance layer accelerates Olam's digital distribution in North Africa.",
+        "Udaan":                      "Explore strategic partnership or merger conversation. MaxSoko is the closest EM B2B FMCG comp to Udaan outside India — combined entity creates a multi-market platform pre-IPO.",
+        "Sanabil Investments":        "Approach via Saudi investment banking intermediary. MaxSoko's Saudi IPO ambition aligns directly with Sanabil's mandate to build Tadawul-ready tech companies.",
+        "STV (Saudi Technology Ventures)": "Re-engage STV — they backed Jahez, the primary Saudi tech IPO comp. Frame MaxSoko as the B2B FMCG equivalent on the Tadawul path.",
+        "ADQ / DisruptAD":            "Approach via Abu Dhabi network. ADQ backed MaxAB (MaxSoko's closest comp) — natural path to back MaxSoko's Saudi expansion and IPO journey.",
+        "Algebra Ventures":           "Engage via Quona's Egypt network. Algebra's Egypt market knowledge makes them the ideal bridge investor ahead of MaxSoko's regional scale-up.",
+    }
+    _ALL_BUYERS = [b[0] for b in regional_buyers] + [b[0] for b in global_strategics] + [b[0] for b in pe_growth]
+
+    if st.button("Generate Exit Actions for MaxSoko"):
+        ticked = [
+            name for name in _ALL_BUYERS
+            if st.session_state.get("engage_maxsoko_reg_" + name.replace(" ", "").replace("/", "").replace("(", "").replace(")", ""), False)
+            or st.session_state.get("engage_maxsoko_glob_" + name.replace(" ", "").replace("/", "").replace("(", "").replace(")", ""), False)
+            or st.session_state.get("engage_maxsoko_pe_" + name.replace(" ", "").replace("/", "").replace("(", "").replace(")", ""), False)
+        ]
+        st.markdown("#### Strategic Acquisition Outreach")
+        if ticked:
+            for name in ticked:
+                action = _BUYER_ACTIONS.get(name, f"Schedule introductory strategic conversation with {name} via Quona network.")
+                st.markdown(
+                    f"<div style='padding:10px 14px;margin-bottom:8px;background:#FFFFFF;"
+                    f"border:1px solid #D4D5CE;border-radius:8px'>"
+                    f"<span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"<span style='color:#2C2C2A;margin-left:10px'>{action}</span></div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown(
+                f"<div style='color:{MUTED};font-size:13px'>Tick at least one buyer above to generate actions.</div>",
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+    # ── Section 5: Saudi IPO Readiness Tracker ───────────────────────────────
     st.markdown(
         f"<div style='font-size:13px;font-weight:700;color:{BLACK};"
         f"margin:0 0 2px 0;letter-spacing:.3px'>Saudi IPO Readiness Tracker</div>",
@@ -5955,7 +6350,7 @@ def _render_khazna_exit_tab() -> None:
             f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>"
         )
 
-    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0):
+    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0, affinity_override=None):
         row_bg = "#EFF0EA" if row_idx % 2 == 0 else "#FFFFFF"
         with st.container():
             st.markdown(
@@ -5982,7 +6377,12 @@ def _render_khazna_exit_tab() -> None:
             with cols[3]:
                 st.checkbox("", key=key)
             with cols[4]:
-                if affinity_cache is None:
+                if affinity_override is not None:
+                    st.markdown(
+                        f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{affinity_override}</div>",
+                        unsafe_allow_html=True,
+                    )
+                elif affinity_cache is None:
                     st.markdown(
                         f"<div style='font-size:11px;color:{MUTED};padding-top:8px'>Sync Affinity above</div>",
                         unsafe_allow_html=True,
@@ -6105,6 +6505,64 @@ def _render_khazna_exit_tab() -> None:
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
+    # ── Section 4: Next Steps Generator ──────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 4px 0;letter-spacing:.3px'>Next Steps Generator</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:14px'>"
+        "Tick buyers to re-engage above, then generate a prioritized outreach plan.</div>",
+        unsafe_allow_html=True,
+    )
+
+    _BUYER_ACTIONS = {
+        "Arab National Bank":              "Schedule bilateral with Arab National Bank strategy team. Frame as natural progression from investor to acquirer given existing deep knowledge of KSA expansion plans.",
+        "AlJazira Capital":                "Engage AlJazira Capital M&A team directly. Position as bridge to a broader Saudi bank acquisition or structured IPO process leveraging their existing stake.",
+        "First Abu Dhabi Bank (FAB)":      "Approach FAB via Quona MENA network. Frame as extending FAB's payroll banking franchise across Egypt and KSA — two of MENA's largest labour markets.",
+        "Fawry":                           "Engage Fawry Business leadership. Frame as acquiring EWA and payroll-backed lending capability to accelerate Fawry's workforce finance expansion beyond payments.",
+        "Commercial International Bank (CIB)": "Approach CIB digital banking team. Frame as instant payroll-backed lending distribution across Egypt's formal sector without building from scratch.",
+        "Wagestream":                      "Escalate relationship to M&A track — existing stake makes this the most natural conversation. Approach Wagestream CEO directly via Quona connection.",
+        "ADP":                             "Engage ADP HCM MENA leadership. Frame as a turnkey EWA and workforce banking solution for ADP's growing Saudi enterprise client base via Mudad partnership.",
+        "Workday":                         "Approach Workday MENA strategy team. Frame as enabling Workday to offer EWA to SA enterprise clients using Khazna's Mudad-integrated KSA payroll infrastructure.",
+        "Fiserv":                          "Approach Fiserv corporate development post-Payfare. Frame as the MENA addition to their global EWA portfolio — directly comparable to the Payfare acquisition logic.",
+        "Network International":           "Engage Network International strategy post-Brookfield acquisition. Frame as complementing their MENA merchant payments stack with workforce banking and payroll-linked payments.",
+        "IFC":                             "Approach IFC via existing relationship. Frame as financial inclusion secondary stake ahead of KSA scale-up — DFI mandate aligns directly with Khazna's unbanked workforce mission.",
+        "Apis Partners":                   "Engage Apis via their Egypt digital banking conviction from MNT-Halan Series E. Frame Khazna as the natural MENA complement to Halan in their portfolio.",
+        "Partech":                         "Flag for outreach at Series B. Khazna at $9.4M ARR with KSA scale-up path fits Partech's growth-stage Africa thesis — approach post SAMA licence.",
+    }
+
+    _ALL_BUYERS = (
+        [b[0] for b in local_buyers]
+        + [b[0] for b in global_buyers]
+        + [b[0] for b in secondaries_buyers]
+    )
+
+    if st.button("Generate Exit Actions for Khazna"):
+        ticked = []
+        for name in _ALL_BUYERS:
+            k_local = "engage_khazna_" + name.replace(" ", "").replace("/", "").replace("(", "").replace(")", "")
+            k_sec   = "engage_khazna_sec_" + name.replace(" ", "").replace("/", "").replace("(", "").replace(")", "")
+            if st.session_state.get(k_local, False) or st.session_state.get(k_sec, False):
+                ticked.append(name)
+        st.markdown("#### Strategic Acquisition Outreach")
+        if ticked:
+            for name in ticked:
+                action = _BUYER_ACTIONS.get(name, f"Schedule introductory conversation with {name} via Quona network.")
+                st.markdown(
+                    f"<div style='padding:10px 14px;margin-bottom:8px;background:#FFFFFF;"
+                    f"border:1px solid #D4D5CE;border-radius:8px'>"
+                    f"<span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"<span style='color:#2C2C2A;margin-left:10px'>{action}</span></div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown(
+                f"<div style='color:{MUTED};font-size:13px'>Tick at least one buyer above to generate actions.</div>",
+                unsafe_allow_html=True,
+            )
+
 
 # ── Enza custom exit tab ──────────────────────────────────────────────────────
 
@@ -6113,6 +6571,18 @@ def _render_enza_exit_tab() -> None:
     GREEN_DOT = "#D5FA94"
     RED_DOT   = "#E57373"
     EMPTY     = "#D4D5CE"
+
+    # ── Look up company_id and LTM revenue ───────────────────────────────────
+    _ez_id_row = pd.read_sql_query(
+        "SELECT id FROM companies WHERE name = 'Enza' LIMIT 1", _conn()
+    )
+    ltm_revenue = None
+    if not _ez_id_row.empty:
+        _ez_id  = int(_ez_id_row.iloc[0]["id"])
+        _ltm_df = load_ltm_revenue(db_version=_db_global_version())
+        _vrow   = _ltm_df[_ltm_df["id"] == _ez_id]
+        if not _vrow.empty and _vrow.iloc[0]["ltm_revenue"] is not None:
+            ltm_revenue = float(_vrow.iloc[0]["ltm_revenue"])
 
     def _pathway_card(title, valuation, description, feasibility_dots, tag, highlight=False):
         border_extra = "border-left:3px solid #D5FA94;" if highlight else ""
@@ -6175,7 +6645,122 @@ def _render_enza_exit_tab() -> None:
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
-    # ── Section 2: Acquirer Universe ─────────────────────────────────────────
+    # ── Section 2: Implied Valuation Range ───────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 6px 0;letter-spacing:.3px'>Implied Valuation Range</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:16px'>"
+        f"Based on ARR multiples for card issuing PaaS in Africa and EM. "
+        f"LTM Revenue / ARR: {fmt_usd(ltm_revenue)}</div>",
+        unsafe_allow_html=True,
+    )
+
+    _HDR_V = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px"
+    )
+    hcols_v = st.columns([2, 1, 1, 1, 2])
+    for hc, lbl in zip(hcols_v, ["Pathway", "Multiple", "Low Case", "Base Case", "High Case"]):
+        with hc:
+            st.markdown(f"<div style='{_HDR_V}'>{lbl}</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='height:2px;background:{BORDER};margin:6px 0 10px'></div>",
+        unsafe_allow_html=True,
+    )
+
+    def _val_row(pathway_name, tag, tag_bg, tag_fg, multiple_lbl,
+                 low, base, high, base_color, note):
+        cols = st.columns([2, 1, 1, 1, 2])
+        with cols[0]:
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:700;color:{BLACK};padding-top:4px'>"
+                f"{pathway_name}</div>"
+                f"<span style='font-size:11px;font-weight:600;background:{tag_bg};color:{tag_fg};"
+                f"border-radius:4px;padding:2px 7px'>{tag}</span>",
+                unsafe_allow_html=True,
+            )
+        with cols[1]:
+            st.markdown(
+                f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{multiple_lbl}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[2]:
+            st.markdown(
+                f"<div style='font-size:14px;color:{BLACK};padding-top:6px'>{fmt_usd(low)}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[3]:
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:700;color:{base_color};padding-top:6px'>"
+                f"{fmt_usd(base)}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[4]:
+            st.markdown(
+                f"<div style='font-size:14px;color:{MUTED};padding-top:6px'>Up to {fmt_usd(high)}</div>",
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            f"<div style='font-size:11px;color:{MUTED};font-style:italic;margin:4px 0 8px'>{note}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"<hr style='border-color:{BORDER};margin:8px 0'>", unsafe_allow_html=True)
+
+    r = ltm_revenue or 0
+    _val_row(
+        "Strategic Sale to Global Issuer-Processor",
+        "Most likely", GREEN, BLACK,
+        "8–15x ARR",
+        r * 8, r * 11, r * 15,
+        "#2E7D32",
+        "Paymentology and Rapyd are the most credible acquirers. Comparable: Network International acquired by Brookfield at ~4x revenue (2023). "
+        "Card issuing PaaS with live African bank clients and local scheme connectivity commands a strategic premium above pure revenue multiples.",
+    )
+    _val_row(
+        "Acqui-hire by Global Payments Network",
+        "Possible", BLUE, "#1565C0",
+        "6–12x ARR",
+        r * 6, r * 9, r * 12,
+        "#1565C0",
+        "Mastercard and Stripe have both paid significant premiums for Africa distribution and team quality. "
+        "Stripe acquired Paystack for $200M+ with limited revenue — team, bank relationships, and scheme connectivity drive value here.",
+    )
+    _val_row(
+        "Strategic Sale to Pan-African Bank",
+        "Lower likelihood", "#D4D5CE", BLACK,
+        "5–10x ARR",
+        r * 5, r * 7, r * 10,
+        BLACK,
+        "Standard Bank and Access Bank are the most credible strategic bank buyers. "
+        "Bank acquisitions of issuing infrastructure typically price below financial investor rounds — regulatory friction and longer sales cycles compress multiples.",
+    )
+    _val_row(
+        "Remain Independent — Series A and Beyond",
+        "Current trajectory", "#D4D5CE", BLACK,
+        "10–20x ARR",
+        r * 10, r * 15, r * 20,
+        BLACK,
+        "Series A round at ARR multiple consistent with African fintech comps (Paystack Series A at ~$8M ARR, Interswitch at ~6x revenue pre-Visa stake). "
+        "Enza's next fundraise will be priced on ARR growth trajectory and bank client count, not exit multiples.",
+    )
+
+    st.markdown(
+        f"<div style='background:{BG};border-radius:8px;padding:12px 16px;"
+        f"font-size:11px;color:{MUTED};margin-top:8px'>"
+        f"Valuation ranges are indicative and based on ARR multiples for card issuing PaaS platforms in Africa and EM. "
+        f"Primary comps: Network International acquired by Brookfield (~4x revenue, 2023), Paystack acquired by Stripe ($200M+, 2020), "
+        f"Tutuka merged with Paymentology (undisclosed, 2022). "
+        f"Mastercard partnership and founding team's Network International background are the strongest valuation signals."
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 3: Acquirer Universe ─────────────────────────────────────────
     st.markdown(
         f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
         f"margin:20px 0 12px 0;letter-spacing:.3px'>Acquirer Universe — Prioritized</div>",
@@ -6195,7 +6780,7 @@ def _render_enza_exit_tab() -> None:
         return (f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:600;"
                 f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>")
 
-    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0):
+    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0, affinity_override=None):
         row_bg = "#EFF0EA" if row_idx % 2 == 0 else "#FFFFFF"
         with st.container():
             st.markdown(
@@ -6222,7 +6807,12 @@ def _render_enza_exit_tab() -> None:
             with cols[3]:
                 st.checkbox("", key=key)
             with cols[4]:
-                if affinity_cache is None:
+                if affinity_override is not None:
+                    st.markdown(
+                        f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{affinity_override}</div>",
+                        unsafe_allow_html=True,
+                    )
+                elif affinity_cache is None:
                     st.markdown(
                         f"<div style='font-size:11px;color:{MUTED};padding-top:8px'>Sync Affinity above</div>",
                         unsafe_allow_html=True,
@@ -6313,15 +6903,15 @@ def _render_enza_exit_tab() -> None:
                 st.markdown(f"<div style='{_HDR_STYLE}'>{lbl}</div>", unsafe_allow_html=True)
         st.markdown("<div style='height:2px;background:#EFF0EA;margin-bottom:8px'></div>", unsafe_allow_html=True)
 
-    tab_strategic, tab_bank = st.tabs(["Global Strategic Buyers", "Pan-African Bank Buyers"])
+    tab_global, tab_local = st.tabs(["Global Strategic Buyers", "Pan-African Bank Buyers"])
 
-    with tab_strategic:
+    with tab_global:
         _header_row()
         for idx, (name, fit, activity, rationale) in enumerate(strategic_buyers):
             key = "engage_enza_" + name.replace(" ", "").replace("(", "").replace(")", "")
             _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
 
-    with tab_bank:
+    with tab_local:
         _header_row()
         for idx, (name, fit, activity, rationale) in enumerate(bank_buyers):
             key = "engage_enza_bank_" + name.replace(" ", "")
@@ -6389,6 +6979,18 @@ def _render_sava_exit_tab() -> None:
     RED_DOT   = "#E57373"
     EMPTY     = "#D4D5CE"
 
+    # ── Look up company_id and LTM revenue ───────────────────────────────────
+    _sv_id_row = pd.read_sql_query(
+        "SELECT id FROM companies WHERE name = 'SAVA' LIMIT 1", _conn()
+    )
+    ltm_revenue = None
+    if not _sv_id_row.empty:
+        _sv_id  = int(_sv_id_row.iloc[0]["id"])
+        _ltm_df = load_ltm_revenue(db_version=_db_global_version())
+        _vrow   = _ltm_df[_ltm_df["id"] == _sv_id]
+        if not _vrow.empty and _vrow.iloc[0]["ltm_revenue"] is not None:
+            ltm_revenue = float(_vrow.iloc[0]["ltm_revenue"])
+
     def _pathway_card(title, valuation, description, feasibility_dots, tag, highlight=False):
         border_extra = "border-left:3px solid #D5FA94;" if highlight else ""
         dots_html = "".join(
@@ -6450,7 +7052,126 @@ def _render_sava_exit_tab() -> None:
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
-    # ── Section 2: Acquirer Universe ─────────────────────────────────────────
+    # ── Section 2: Implied Valuation Range ───────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 6px 0;letter-spacing:.3px'>Implied Valuation Range</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:16px'>"
+        f"Based on revenue multiples consistent with SA fintech comps and SARB licence premium. "
+        f"LTM Revenue: {fmt_usd(ltm_revenue)}</div>",
+        unsafe_allow_html=True,
+    )
+
+    _HDR_V = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px"
+    )
+    hcols_v = st.columns([2, 1, 1, 1, 2])
+    for hc, lbl in zip(hcols_v, ["Pathway", "Multiple", "Low Case", "Base Case", "High Case"]):
+        with hc:
+            st.markdown(f"<div style='{_HDR_V}'>{lbl}</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='height:2px;background:{BORDER};margin:6px 0 10px'></div>",
+        unsafe_allow_html=True,
+    )
+
+    def _val_row(pathway_name, tag, tag_bg, tag_fg, multiple_lbl,
+                 low, base, high, base_color, note):
+        cols = st.columns([2, 1, 1, 1, 2])
+        with cols[0]:
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:700;color:{BLACK};padding-top:4px'>"
+                f"{pathway_name}</div>"
+                f"<span style='font-size:11px;font-weight:600;background:{tag_bg};color:{tag_fg};"
+                f"border-radius:4px;padding:2px 7px'>{tag}</span>",
+                unsafe_allow_html=True,
+            )
+        with cols[1]:
+            st.markdown(
+                f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{multiple_lbl}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[2]:
+            st.markdown(
+                f"<div style='font-size:14px;color:{BLACK};padding-top:6px'>{fmt_usd(low)}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[3]:
+            st.markdown(
+                f"<div style='font-size:14px;font-weight:700;color:{base_color};padding-top:6px'>"
+                f"{fmt_usd(base)}</div>",
+                unsafe_allow_html=True,
+            )
+        with cols[4]:
+            st.markdown(
+                f"<div style='font-size:14px;color:{MUTED};padding-top:6px'>Up to {fmt_usd(high)}</div>",
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            f"<div style='font-size:11px;color:{MUTED};font-style:italic;margin:4px 0 8px'>{note}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"<hr style='border-color:{BORDER};margin:8px 0'>", unsafe_allow_html=True)
+
+    r = ltm_revenue or 0
+    _val_row(
+        "Strategic Sale — Local (Bank or Telco)",
+        "Most likely", GREEN, BLACK,
+        "10–20x revenue",
+        r * 10, r * 15, r * 20,
+        "#2E7D32",
+        "Capitec (post-Walletdoc) and Vodacom (VodaPay) are the most credible local acquirers. "
+        "SARB banking licence creates significant scarcity premium — comparable: TymeBank valued at $1.5B (2024) with SARB licence as key value driver. "
+        "SA bank M&A has historically priced at 1.5–3x book value; Sava's licence and tech stack shift the framing to revenue multiples.",
+    )
+    _val_row(
+        "Consolidation with Yoco or Lula",
+        "Possible", BLUE, "#1565C0",
+        "based on contribution",
+        r * 8, r * 12, r * 18,
+        "#1565C0",
+        "Consolidation valuation would be driven by Sava's relative contribution to the combined entity. "
+        "Yoco at ~$400M valuation and Lula at ~$100M (estimated) — Sava's licence adds structural value beyond revenue multiple. "
+        "Comparable: Yoco acquired PayFast parent DPO for undisclosed sum to add acquiring infrastructure.",
+    )
+    _val_row(
+        "Strategic Sale — Global (SaaS or Fintech)",
+        "Longer horizon", "#D4D5CE", BLACK,
+        "10–20x revenue",
+        r * 10, r * 14, r * 20,
+        BLACK,
+        "Xero and Sage are the most credible global strategic buyers given existing SA SME presence. "
+        "Xero acquired Syft Analytics in 2024 (undisclosed). Sage acquired Brightpearl at ~5x ARR. "
+        "A global acquirer pays for the SA SME distribution and SARB licence, not the current revenue run-rate.",
+    )
+    _val_row(
+        "Remain Independent — Raise Series A",
+        "Current trajectory", "#D4D5CE", BLACK,
+        "8–15x revenue",
+        r * 8, r * 11, r * 15,
+        BLACK,
+        "Series A round would price on ARR growth trajectory and SARB licence optionality. "
+        "SA challenger bank comps: Spot Money, Payflex at 8–12x ARR at seed/Series A. "
+        "SARB licence is the primary valuation anchor — no comparable SA fintech has raised without one at this stage.",
+    )
+
+    st.markdown(
+        f"<div style='background:{BG};border-radius:8px;padding:12px 16px;"
+        f"font-size:11px;color:{MUTED};margin-top:8px'>"
+        f"Valuation ranges are indicative and based on revenue multiples consistent with SA fintech comps. "
+        f"Primary comps: TymeBank ($1.5B valuation, SARB licence, 2024), Yoco (~$400M valuation, 2022), "
+        f"Capitec acquisition of Walletdoc (R400M, 2025). "
+        f"SARB banking licence is the single most important value driver — scarcity premium applies above all revenue multiples."
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 3: Acquirer Universe ─────────────────────────────────────────
     st.markdown(
         f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
         f"margin:20px 0 12px 0;letter-spacing:.3px'>Acquirer Universe — Prioritized</div>",
@@ -6472,7 +7193,7 @@ def _render_sava_exit_tab() -> None:
             f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>"
         )
 
-    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0):
+    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0, affinity_override=None):
         row_bg = "#EFF0EA" if row_idx % 2 == 0 else "#FFFFFF"
         with st.container():
             st.markdown(
@@ -6499,7 +7220,12 @@ def _render_sava_exit_tab() -> None:
             with cols[3]:
                 st.checkbox("", key=key)
             with cols[4]:
-                if affinity_cache is None:
+                if affinity_override is not None:
+                    st.markdown(
+                        f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{affinity_override}</div>",
+                        unsafe_allow_html=True,
+                    )
+                elif affinity_cache is None:
                     st.markdown(
                         f"<div style='font-size:11px;color:{MUTED};padding-top:8px'>Sync Affinity above</div>",
                         unsafe_allow_html=True,
