@@ -561,7 +561,7 @@ def load_stage_snapshots(comp_ids: tuple) -> pd.DataFrame:
         FROM comp_stage_snapshots WHERE comp_id IN ({ph})
     """, _comps_conn(), params=list(comp_ids))
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)
 def load_companies(db_version: str = "") -> pd.DataFrame:
     return pd.read_sql_query("""
         SELECT c.id, c.name, c.sector, c.hq_country, c.founded_year, c.fund,
@@ -892,6 +892,7 @@ def _db_global_version() -> str:
     return str(row[0]) if (row and row[0]) else "none"
 
 
+@st.cache_data(ttl=300)
 def _ipo_readiness_load(company_id: int) -> dict:
     """Return {item_key: {status, notes, updated_at}} from ipo_readiness table."""
     conn = _conn()
@@ -3314,15 +3315,7 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
         st.session_state[f"upload_db_path_{company_id}"]     = DB_PATH
         st.session_state[f"upload_row_count_{company_id}"]   = _vcount
         st.session_state.pop(ss_fkey, None)
-        # Belt-and-suspenders: clear in-process caches.
-        # Cross-worker staleness is handled by db_version keys in each cached function.
-        load_kpis.clear()
-        load_ltm_revenue.clear()
-        load_ltm_volume.clear()
-        load_all_revenue.clear()
-        load_companies.clear()
-        load_revenue_growth.clear()
-        load_company_info.clear()
+        st.cache_data.clear()
         st.rerun()
 
 
