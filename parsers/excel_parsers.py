@@ -15,7 +15,7 @@ import openpyxl
 FX_ZAR: float = 16.5
 FX_NGN: float = 1600.0   # NGN/USD — update periodically
 
-SUPPORTED_COMPANIES: set[str] = {"Yoco", "Lulalend", "Verto", "VertoFX", "MaxSoko", "Cowrywise", "Twinco", "TWINCO", "Khazna"}
+SUPPORTED_COMPANIES: set[str] = {"Yoco", "Lulalend", "Verto", "VertoFX", "MaxSoko", "Cowrywise", "Twinco", "TWINCO", "Khazna", "Enza"}
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -1020,6 +1020,68 @@ def parse_khazna(file_bytes: bytes) -> list[dict]:
     return results
 
 
+def parse_enza(file_bytes: bytes) -> list[dict]:
+    import io
+    from datetime import datetime
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+    ws = wb["KPIs"]
+
+    rows = list(ws.iter_rows(max_row=60, values_only=True))
+
+    date_row = rows[0]
+
+    label_map = {}
+    for i, row in enumerate(rows):
+        label = row[1]
+        if isinstance(label, str):
+            label_map[label.strip()] = i
+
+    def _get(label, col_idx):
+        i = label_map.get(label)
+        if i is None:
+            return None
+        val = rows[i][col_idx]
+        if isinstance(val, str):
+            return None
+        return val
+
+    results = []
+    for col_idx in range(4, len(date_row)):
+        date_val = date_row[col_idx]
+        if not isinstance(date_val, datetime):
+            continue
+
+        period_end = date_val.strftime("%Y-%m-%d")
+
+        revenue = _get("Total Revenues", col_idx)
+        if revenue is None or revenue == 0:
+            continue
+
+        gp         = _get("Contribution Margin ", col_idx)
+        gm_pct_raw = _get("Contibution Margin ", col_idx)  # typo is in the source file
+        ebitda     = _get("EBITDA", col_idx)
+        clients    = _get("Number of Clients (Banks/Institutions)", col_idx)
+
+        gm_pct = round(float(gm_pct_raw) * 100, 4) if gm_pct_raw is not None else None
+        em_pct = round(float(ebitda) / float(revenue) * 100, 4) if (ebitda is not None and revenue) else None
+
+        results.append({
+            "period_end_date":      period_end,
+            "reporting_currency":   "USD",
+            "revenue_usd":          float(revenue),
+            "gross_profit_usd":     float(gp) if gp is not None else None,
+            "gross_margin_pct":     gm_pct,
+            "ebitda_usd":           float(ebitda) if ebitda is not None else None,
+            "ebitda_margin_pct":    em_pct,
+            "active_clients_count": int(clients) if clients is not None else None,
+            "revenue_growth_pct":   None,
+        })
+
+    return results
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 PARSERS: dict[str, callable] = {
@@ -1032,4 +1094,5 @@ PARSERS: dict[str, callable] = {
     "Twinco":    parse_twinco,
     "TWINCO":    parse_twinco,
     "Khazna":    parse_khazna,
+    "Enza":      parse_enza,
 }
