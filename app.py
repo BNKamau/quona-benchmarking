@@ -1893,7 +1893,13 @@ def render_benchmarking_tab(
         )
         md_cust_r = 70.0
 
-        cats  = ["Gross Margin", "Revenue Scale", "EBITDA", "Geography", "Growth", "Customers"]
+        MULTI_MARKET_COMPANIES = {
+            "Verto", "VertoFX", "Enza", "TWINCO", "MaxSoko", "Khazna", "POWER",
+        }
+        geo_sub   = "Multi-Market" if company_name in MULTI_MARKET_COMPANIES else "Single Market"
+        geo_label = f"Geography\n{geo_sub}"
+
+        cats  = ["Gross Margin", "Revenue Scale", "EBITDA", geo_label, "Growth", "Customers"]
         co_v  = [co_gm_r, co_rev_r, co_em_r, co_geo_r, co_growth_r, co_cust_r]
         md_v  = [md_gm_r, md_rev_r, md_em_r, md_geo_r, md_growth_r, md_cust_r]
 
@@ -1926,7 +1932,7 @@ def render_benchmarking_tab(
                 orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5,
             ),
             paper_bgcolor=BG,
-            margin=dict(l=30, r=30, t=20, b=50),
+            margin=dict(l=50, r=50, t=20, b=60),
             height=380,
         )
         st.plotly_chart(fig_r, use_container_width=True, config={"displayModeBar": False})
