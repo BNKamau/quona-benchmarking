@@ -15,7 +15,7 @@ import openpyxl
 FX_ZAR: float = 16.5
 FX_NGN: float = 1600.0   # NGN/USD — update periodically
 
-SUPPORTED_COMPANIES: set[str] = {"Yoco", "Lulalend", "Verto", "VertoFX", "MaxSoko", "Cowrywise", "Twinco", "TWINCO", "Khazna", "Enza"}
+SUPPORTED_COMPANIES: set[str] = {"Yoco", "Lulalend", "Verto", "VertoFX", "MaxSoko", "Cowrywise", "Twinco", "TWINCO", "Khazna", "Enza", "SAVA"}
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -1082,6 +1082,50 @@ def parse_enza(file_bytes: bytes) -> list[dict]:
     return results
 
 
+def parse_sava(file_bytes: bytes) -> list[dict]:
+    import io
+    import calendar
+    from datetime import datetime, date
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+    ws = wb["Revenue To Date"]
+    rows = list(ws.iter_rows(max_row=22, values_only=True))
+
+    results = []
+    for row in rows:
+        date_val = row[0]
+        if not isinstance(date_val, datetime):
+            continue
+
+        revenue_usd = row[2]
+        if not isinstance(revenue_usd, (int, float)) or revenue_usd == 0:
+            continue
+
+        revenue_zar = row[1]
+        last_day = calendar.monthrange(date_val.year, date_val.month)[1]
+        period_end = date(date_val.year, date_val.month, last_day).strftime("%Y-%m-%d")
+
+        fx_rate = None
+        if isinstance(revenue_zar, (int, float)) and revenue_zar and revenue_usd:
+            fx_rate = round(revenue_zar / revenue_usd, 6)
+
+        results.append({
+            "period_end_date":      period_end,
+            "reporting_currency":   "ZAR",
+            "fx_rate_to_usd":       fx_rate,
+            "revenue_usd":          float(revenue_usd),
+            "gross_profit_usd":     None,
+            "gross_margin_pct":     None,
+            "ebitda_usd":           None,
+            "ebitda_margin_pct":    None,
+            "active_clients_count": None,
+            "revenue_growth_pct":   None,
+        })
+
+    return results
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 PARSERS: dict[str, callable] = {
@@ -1095,4 +1139,5 @@ PARSERS: dict[str, callable] = {
     "TWINCO":    parse_twinco,
     "Khazna":    parse_khazna,
     "Enza":      parse_enza,
+    "SAVA":      parse_sava,
 }
