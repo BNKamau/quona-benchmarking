@@ -6195,14 +6195,14 @@ def _render_enza_exit_tab() -> None:
         return (f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:600;"
                 f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>")
 
-    def _buyer_row(name, fit, activity, rationale, key, row_idx=0):
+    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0):
         row_bg = "#EFF0EA" if row_idx % 2 == 0 else "#FFFFFF"
         with st.container():
             st.markdown(
                 f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
                 unsafe_allow_html=True,
             )
-            cols = st.columns([2, 2, 3, 1])
+            cols = st.columns([2, 2, 3, 1, 2])
             with cols[0]:
                 st.markdown(
                     f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
@@ -6221,6 +6221,31 @@ def _render_enza_exit_tab() -> None:
                 )
             with cols[3]:
                 st.checkbox("", key=key)
+            with cols[4]:
+                if affinity_cache is None:
+                    st.markdown(
+                        f"<div style='font-size:11px;color:{MUTED};padding-top:8px'>Sync Affinity above</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    note = affinity_cache.get(name)
+                    if note is None:
+                        st.markdown(
+                            f"<div style='font-size:11px;color:{MUTED};font-style:italic;padding-top:8px'>Not in Affinity</div>",
+                            unsafe_allow_html=True,
+                        )
+                    elif note.get("stale"):
+                        st.markdown(
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            unsafe_allow_html=True,
+                        )
             st.markdown("</div>", unsafe_allow_html=True)
 
     strategic_buyers = [
@@ -6259,15 +6284,30 @@ def _render_enza_exit_tab() -> None:
          "Enza's bank-facing issuing infrastructure could accelerate Absa's digital banking product rollout for partner fintechs across its African footprint."),
     ]
 
+    affinity_cache = st.session_state.get("enza_affinity_data")
+    _, _sync_btn_col = st.columns([6, 1])
+    with _sync_btn_col:
+        if st.button("Sync Affinity", key="enza_affinity_sync"):
+            _api_key  = st.secrets.get("AFFINITY_API_KEY", "")
+            all_names = list(dict.fromkeys(
+                [b[0] for b in strategic_buyers]
+                + [b[0] for b in bank_buyers]
+            ))
+            with st.spinner("Fetching Affinity data for all buyers…"):
+                st.session_state["enza_affinity_data"] = {
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    for bname in all_names
+                }
+            st.rerun()
+
     _HDR_STYLE = (
         f"font-size:10px;font-weight:700;color:#93A3A1;"
         f"text-transform:uppercase;letter-spacing:.5px;padding-bottom:4px"
     )
 
     def _header_row():
-        ncols = [2, 2, 3, 1]
-        labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage?"]
-        hcols = st.columns(ncols)
+        hcols  = st.columns([2, 2, 3, 1, 2])
+        labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage?", "Last Affinity Contact"]
         for hc, lbl in zip(hcols, labels):
             with hc:
                 st.markdown(f"<div style='{_HDR_STYLE}'>{lbl}</div>", unsafe_allow_html=True)
@@ -6279,13 +6319,13 @@ def _render_enza_exit_tab() -> None:
         _header_row()
         for idx, (name, fit, activity, rationale) in enumerate(strategic_buyers):
             key = "engage_enza_" + name.replace(" ", "").replace("(", "").replace(")", "")
-            _buyer_row(name, fit, activity, rationale, key, row_idx=idx)
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
 
     with tab_bank:
         _header_row()
         for idx, (name, fit, activity, rationale) in enumerate(bank_buyers):
             key = "engage_enza_bank_" + name.replace(" ", "")
-            _buyer_row(name, fit, activity, rationale, key, row_idx=idx)
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
