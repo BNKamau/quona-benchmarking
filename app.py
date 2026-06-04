@@ -6106,6 +6106,240 @@ def _render_khazna_exit_tab() -> None:
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
 
+# ── Enza custom exit tab ──────────────────────────────────────────────────────
+
+def _render_enza_exit_tab() -> None:
+    AMBER     = "#FFC107"
+    GREEN_DOT = "#D5FA94"
+    RED_DOT   = "#E57373"
+    EMPTY     = "#D4D5CE"
+
+    def _pathway_card(title, valuation, description, feasibility_dots, tag, highlight=False):
+        border_extra = "border-left:3px solid #D5FA94;" if highlight else ""
+        dots_html = "".join(
+            f"<span style='display:inline-block;width:10px;height:10px;border-radius:50%;"
+            f"background:{d};margin-right:3px'></span>"
+            for d in feasibility_dots
+        )
+        rev_line = (
+            f"<div style='font-size:12px;color:{MUTED};margin-top:2px'>{valuation[1]}</div>"
+            if len(valuation) > 1 else ""
+        )
+        return f"""
+<div style='background:#FFFFFF;border:1px solid #D4D5CE;{border_extra}border-radius:8px;
+     padding:16px;height:100%'>
+  <div style='font-size:14px;font-weight:700;color:#2C2C2A;margin-bottom:4px'>{title}</div>
+  <div style='font-size:10px;color:#93A3A1;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px'>Valuation</div>
+  <div style='font-size:13px;color:#2C2C2A'>{valuation[0]}</div>
+  {rev_line}
+  <div style='font-size:12px;color:#93A3A1;font-style:italic;margin:6px 0 8px'>{description}</div>
+  <div style='margin:4px 0 8px'>{dots_html}</div>
+  <span style='font-size:11px;font-weight:600;color:{MUTED};background:#EFF0EA;
+    border-radius:4px;padding:2px 7px'>{tag}</span>
+</div>"""
+
+    pathways = [
+        (
+            "Strategic Sale to Global Issuer-Processor",
+            ["$80–200M", "8–15x ARR"],
+            "Acquisition by a global card issuing or PaaS platform seeking African bank client distribution and local scheme connectivity — the most direct fit given Enza's product.",
+            [GREEN_DOT, GREEN_DOT, GREEN_DOT], "Most likely — 36–48 months", True,
+        ),
+        (
+            "Acqui-hire by Global Payments Network",
+            ["$50–150M"],
+            "Acquisition by Mastercard, Visa, or Stripe primarily for the team, Africa bank relationships, and scheme connectivity built across Egypt, Nigeria, and South Africa.",
+            [AMBER, GREEN_DOT, AMBER], "Possible — dependent on scale", False,
+        ),
+        (
+            "Strategic Sale to Pan-African Bank",
+            ["$40–100M", "5–10x ARR"],
+            "Acquisition by a pan-African bank group seeking to own issuing infrastructure rather than buy it as a service.",
+            [AMBER, AMBER, EMPTY], "Lower likelihood — long sales cycle", False,
+        ),
+        (
+            "Remain Independent — Series A and Beyond",
+            ["TBD at Series A valuation"],
+            "Continue scaling bank and fintech client base, raise Series A, and build toward a larger exit — requires demonstrating unit economics at scale first.",
+            [AMBER, AMBER, EMPTY], "Current trajectory", False,
+        ),
+    ]
+
+    with st.expander("Exit Pathways — click to expand", expanded=False):
+        row1, row2 = st.columns(2), st.columns(2)
+        for idx, (title, val, desc, dots, tag, highlight) in enumerate(pathways):
+            col = row1[idx] if idx < 2 else row2[idx - 2]
+            with col:
+                st.markdown(_pathway_card(title, val, desc, dots, tag, highlight), unsafe_allow_html=True)
+                st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 2: Acquirer Universe ─────────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 12px 0;letter-spacing:.3px'>Acquirer Universe — Prioritized</div>",
+        unsafe_allow_html=True,
+    )
+
+    FIT_COLORS = {
+        "Very High":  ("#D5FA94", "#2C2C2A"),
+        "High":       ("#C5E5FF", "#1565C0"),
+        "Medium":     ("#D4D5CE", "#2C2C2A"),
+        "Low-Medium": ("#FFCDD2", "#B71C1C"),
+        "Low":        ("#FFCDD2", "#B71C1C"),
+    }
+
+    def _fit_badge(fit):
+        bg, fg = FIT_COLORS.get(fit, ("#D4D5CE", "#2C2C2A"))
+        return (f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:600;"
+                f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>")
+
+    def _buyer_row(name, fit, activity, rationale, key, row_idx=0):
+        row_bg = "#EFF0EA" if row_idx % 2 == 0 else "#FFFFFF"
+        with st.container():
+            st.markdown(
+                f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
+                unsafe_allow_html=True,
+            )
+            cols = st.columns([2, 2, 3, 1])
+            with cols[0]:
+                st.markdown(
+                    f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"{_fit_badge(fit)}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[1]:
+                st.markdown(
+                    f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{activity}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[2]:
+                st.markdown(
+                    f"<div style='font-size:13px;color:#2C2C2A;padding-top:6px'>{rationale}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[3]:
+                st.checkbox("", key=key)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    strategic_buyers = [
+        ("Paymentology (SaltPay Group)", "Very High",
+         "Dominant Africa/EM issuer-processor; actively scaling post-Tutuka merger",
+         "Enza's African bank client base and local scheme connectivity (NIBSS, PayShap, InstaPay) directly fills Paymentology's distribution gap in Nigeria, South Africa, and Egypt."),
+        ("Network International (Brookfield)", "Very High",
+         "Enza founders' former employer; taken private by Brookfield 2023",
+         "Founding team spent years building Network's Africa acceptance business — reacquiring their issuing infrastructure play is a highly logical bolt-on."),
+        ("Mastercard", "High",
+         "Active Enza partner; $200M MTN MoMo stake (2023)",
+         "Mastercard already uses Enza as its fintech-to-card-issuance bridge in Africa. Partnership-to-acquisition is a well-worn Mastercard playbook across the continent."),
+        ("Visa / Visa Direct", "High",
+         "Active Africa M&A thesis; Interswitch minority stake (2019)",
+         "Visa needs bank-facing issuing infrastructure in Egypt, Nigeria, and South Africa to deepen scheme penetration beyond acquirer relationships."),
+        ("Stripe", "High",
+         "Acquired Paystack $200M+ for Africa access (2020)",
+         "Stripe's Africa stack is strong on the merchant/acquiring side via Paystack but thin on card issuing and bank-facing PaaS — Enza fills that gap directly."),
+        ("Rapyd", "Medium",
+         "Acquired PayU GPO $610M (2023); building global FaaS stack",
+         "Rapyd's issuing capability in Africa is limited. Enza adds the bank-side infrastructure layer Rapyd needs to offer full issuing-plus-acceptance in key African markets."),
+        ("Nuvei", "Medium",
+         "Taken private by Advent International 2024; active EM expansion",
+         "Nuvei's EM issuing footprint is thin. Enza would accelerate their Africa bank client penetration with an existing live platform."),
+    ]
+
+    bank_buyers = [
+        ("Standard Bank", "Medium",
+         "Largest African bank by assets; active fintech M&A",
+         "Owning Enza's issuing PaaS would let Standard Bank offer white-label card infrastructure to its African correspondent bank network at scale."),
+        ("Access Bank", "Medium",
+         "Aggressive pan-African expansion; 18+ country footprint",
+         "Access Bank's pan-African ambition needs infrastructure to match. Enza's multi-market issuing rails across Nigeria, Egypt, and South Africa align directly."),
+        ("Absa Group", "Low-Medium",
+         "Digitising retail and SME banking across Africa",
+         "Enza's bank-facing issuing infrastructure could accelerate Absa's digital banking product rollout for partner fintechs across its African footprint."),
+    ]
+
+    _HDR_STYLE = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px;padding-bottom:4px"
+    )
+
+    def _header_row():
+        ncols = [2, 2, 3, 1]
+        labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage?"]
+        hcols = st.columns(ncols)
+        for hc, lbl in zip(hcols, labels):
+            with hc:
+                st.markdown(f"<div style='{_HDR_STYLE}'>{lbl}</div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:2px;background:#EFF0EA;margin-bottom:8px'></div>", unsafe_allow_html=True)
+
+    tab_strategic, tab_bank = st.tabs(["Global Strategic Buyers", "Pan-African Bank Buyers"])
+
+    with tab_strategic:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(strategic_buyers):
+            key = "engage_enza_" + name.replace(" ", "").replace("(", "").replace(")", "")
+            _buyer_row(name, fit, activity, rationale, key, row_idx=idx)
+
+    with tab_bank:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(bank_buyers):
+            key = "engage_enza_bank_" + name.replace(" ", "")
+            _buyer_row(name, fit, activity, rationale, key, row_idx=idx)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 3: Next Steps Generator ──────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 4px 0;letter-spacing:.3px'>Next Steps Generator</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:14px'>"
+        "Tick buyers to re-engage above, then generate a prioritized outreach plan.</div>",
+        unsafe_allow_html=True,
+    )
+
+    _BUYER_ACTIONS = {
+        "Paymentology (SaltPay Group)":        "Approach via shared investor network. Frame as African bank distribution acquisition — Enza already operates where Paymentology is thin.",
+        "Network International (Brookfield)":  "Warm intro via founding team relationship — direct outreach from Hany Fekry or Hamish Houston is the right channel.",
+        "Mastercard":                          "Escalate existing partnership conversation to M&A track. Propose strategic review with Mastercard Africa leadership.",
+        "Visa / Visa Direct":                  "Approach via Visa's Africa fintech investment team. Frame as bank-side issuing infrastructure to complement Visa's acquirer relationships.",
+        "Stripe":                              "Approach via investment banking intermediary. Frame as the issuing-side complement to Paystack's acquiring-side Africa play.",
+        "Rapyd":                               "Flag for outreach once Enza reaches 20M+ monthly transactions. Rapyd appetite for Africa issuing will grow as PayU integration settles.",
+        "Standard Bank":                       "Engage via Quona board network. Frame as white-label issuing infrastructure for Standard Bank's correspondent banking partners.",
+        "Access Bank":                         "Approach via Quona Africa network. Align with Access Bank's pan-African digital infrastructure buildout narrative.",
+    }
+
+    _ALL_BUYERS = [b[0] for b in strategic_buyers] + [b[0] for b in bank_buyers]
+
+    if st.button("Generate Exit Actions for Enza"):
+        ticked = [
+            name for name in _ALL_BUYERS
+            if st.session_state.get(
+                "engage_enza_" + name.replace(" ", "").replace("(", "").replace(")", ""),
+                st.session_state.get("engage_enza_bank_" + name.replace(" ", ""), False)
+            )
+        ]
+        st.markdown("#### Strategic Acquisition Outreach")
+        if ticked:
+            for name in ticked:
+                action = _BUYER_ACTIONS.get(name, f"Schedule introductory conversation with {name} via Quona network.")
+                st.markdown(
+                    f"<div style='padding:10px 14px;margin-bottom:8px;background:#FFFFFF;"
+                    f"border:1px solid #D4D5CE;border-radius:8px'>"
+                    f"<span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"<span style='color:#2C2C2A;margin-left:10px'>{action}</span></div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown(
+                f"<div style='color:{MUTED};font-size:13px'>Tick at least one buyer above to generate actions.</div>",
+                unsafe_allow_html=True,
+            )
+
+
 # ── Exit Tracking tab ─────────────────────────────────────────────────────────
 
 def render_exit_tab(info: pd.Series, company_id: int) -> None:
@@ -6113,6 +6347,11 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
     sector       = str(info.get("sector", "")).lower()
     _today       = datetime.utcnow()
     cur_q        = f"Q{(_today.month - 1) // 3 + 1} {_today.year}"
+
+    # ── Enza custom exit tab ───────────────────────────────────────────────────
+    if company_name == "Enza":
+        _render_enza_exit_tab()
+        return
 
     # ── Cowrywise custom exit tab ──────────────────────────────────────────────
     if company_name == "Cowrywise":
