@@ -304,101 +304,95 @@ def _quarter_gp_zar(quarter_end: str, monthly_gp: dict[str, float]) -> float | N
 
 
 def parse_lulalend(file_bytes: bytes) -> list[dict]:
-    """
-    Sheet: KPI's  — quarterly (row 5 = quarter labels, col C = metric labels)
-    Sheet: P&L -* — monthly  (row 5 = month headers, col A = metric labels)
-    Currency: ZAR / 16.5 → USD
-    """
+    import calendar
+    from datetime import date
+
+    MONTH_MAP = {
+        "january": 1, "february": 2, "march": 3, "april": 4,
+        "may": 5, "june": 6, "july": 7, "august": 8,
+        "september": 9, "october": 10, "november": 11, "december": 12,
+    }
+
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    ws = wb["KPIs"] if "KPIs" in wb.sheetnames else wb["KPI's"]
+    rows = list(ws.iter_rows(max_row=30, values_only=True))
 
-    if "KPI's" not in wb.sheetnames:
-        raise ValueError(f"Sheet 'KPI's' not found. Sheets: {wb.sheetnames}")
-    ws = wb["KPI's"]
+    # Row 5 (index 4): period labels — "March 2026", "December 2025" etc
+    # Data columns start at index 3 (column D)
+    period_row = rows[4]
 
-    # Labels are in col C (col 3), data in cols 4+
-    row_rev  = find_row(ws, "Credit Revenue",             label_col=3)
-    row_ebt  = find_row(ws, "EBITDA",                     label_col=3, exact=True)
-    row_loan = find_row(ws, "Net Loan Portfolio",          label_col=3)
-    row_yld  = find_row(ws, "Average Annualized Interest", label_col=3)
-    row_p30  = find_row(ws, "Par 30",                     label_col=3)
-    row_p90  = find_row(ws, "Par 90",                     label_col=3, exact=True)
-    row_ac   = find_row(ws, "Total active clients",       label_col=3)
-    row_uniq = find_row(ws, "Number of SMEs - Unique",    label_col=3)
+    # Build label -> row index map from col C (index 2)
+    label_map = {}
+    for i, row in enumerate(rows):
+        label = row[2]
+        if isinstance(label, str):
+            label_map[label.strip()] = i
 
-    if row_rev is None:
-        raise ValueError(
-            "Cannot find 'Credit Revenue' row in Lulalend KPI's sheet"
-        )
+    def _get(label, col_idx):
+        i = label_map.get(label)
+        if i is None:
+            return None
+        val = rows[i][col_idx]
+        return float(val) if isinstance(val, (int, float)) else None
 
-    # Quarter date columns: row 5, cols 4+  ("December  2025", "September 2025", …)
-    quarter_cols: dict[int, str] = {}
-    for c in range(4, ws.max_column + 1):
-        raw = ws.cell(5, c).value
-        if isinstance(raw, str) and raw.strip():
-            d = _normalize_month_str(raw.strip())
-            if d:
-                quarter_cols[c] = d
+    ZAR_TO_USD = 18.5
 
-    # Monthly gross profit from the P&L sheet (name starts with "P&L")
-    monthly_gp: dict[str, float] = {}
-    pl_ws = next(
-        (wb[n] for n in wb.sheetnames if n.startswith("P&L")), None
-    )
-    if pl_ws is not None:
-        row_gp_pl = find_row(pl_ws, "Gross Profit", label_col=1, exact=True)
-        if row_gp_pl:
-            for c in range(2, pl_ws.max_column + 1):
-                hdr = pl_ws.cell(5, c).value
-                if not hdr or "YTD" in str(hdr):
-                    continue
-                d = _parse_pl_header(str(hdr))
-                if d:
-                    val = safe_float(pl_ws.cell(row_gp_pl, c).value)
-                    if val is not None:
-                        monthly_gp[d] = val
-
-    results: list[dict] = []
-    for col, period in sorted(quarter_cols.items(), key=lambda x: x[1]):
-
-        def _g(row):
-            return safe_float(ws.cell(row, col).value) if row else None
-
-        rev_zar  = _g(row_rev)
-        if not rev_zar:
+    results = []
+    for col_idx in range(3, len(period_row)):
+        period_label = period_row[col_idx]
+        if not isinstance(period_label, str) or not period_label.strip():
             continue
 
-        ebt_zar  = _g(row_ebt)
-        loan_zar = _g(row_loan)
-        yld_raw  = _g(row_yld)
-        p30_raw  = _g(row_p30)
-        p90_raw  = _g(row_p90)
-        ac       = _g(row_ac)
-        uniq     = _g(row_uniq)
+        parts = period_label.strip().split()
+        if len(parts) != 2:
+            continue
+        month_name, year_str = parts[0].lower().strip(), parts[1].strip()
+        month_num = MONTH_MAP.get(month_name)
+        if not month_num:
+            continue
+        try:
+            year = int(year_str)
+        except ValueError:
+            continue
+        last_day = calendar.monthrange(year, month_num)[1]
+        period_end = date(year, month_num, last_day).strftime("%Y-%m-%d")
 
-        rev_usd  = round(rev_zar  / FX_ZAR, 2)
-        ebt_usd  = round(ebt_zar  / FX_ZAR, 2) if ebt_zar  is not None else None
-        loan_usd = round(loan_zar / FX_ZAR, 2) if loan_zar is not None else None
-        em_pct   = round(ebt_usd  / rev_usd * 100, 4) if (ebt_usd is not None and rev_usd) else None
+        revenue_zar    = _get("Credit Revenue", col_idx)
+        ebitda_zar     = _get("EBITDA", col_idx)
+        loan_book_zar  = _get("Net Loan Portfolio", col_idx)
+        net_yield_raw  = _get("Average Annualized Interest Rate", col_idx)
+        par_30_raw     = _get("Par 30 + Restructured loans", col_idx)
+        par_90_raw     = _get("Par 90", col_idx)
+        active_clients = _get("Total active clients", col_idx)
+        unique_smes    = _get("Number of SMEs - Unique to date", col_idx)
 
-        gp_zar   = _quarter_gp_zar(period, monthly_gp)
-        gp_usd   = round(gp_zar / FX_ZAR, 2) if gp_zar is not None else None
-        gm_pct   = round(gp_zar / rev_zar * 100, 4) if gp_zar is not None else None
+        if revenue_zar is None or revenue_zar == 0:
+            continue
+
+        revenue_usd   = revenue_zar / ZAR_TO_USD
+        ebitda_usd    = ebitda_zar / ZAR_TO_USD if ebitda_zar is not None else None
+        loan_book_usd = loan_book_zar / ZAR_TO_USD if loan_book_zar is not None else None
+        ebitda_margin = round(ebitda_usd / revenue_usd * 100, 4) if ebitda_usd is not None else None
+
+        net_yield_pct = round(net_yield_raw * 100, 4) if net_yield_raw is not None else None
+        par_30_pct    = round(par_30_raw * 100, 4) if par_30_raw is not None else None
+        par_90_pct    = round(par_90_raw * 100, 4) if par_90_raw is not None else None
 
         results.append({
-            "period_end_date":        period,
+            "period_end_date":        period_end,
             "reporting_currency":     "ZAR",
-            "fx_rate_to_usd":         FX_ZAR,
-            "revenue_usd":            rev_usd,
-            "gross_profit_usd":       gp_usd,
-            "gross_margin_pct":       gm_pct,
-            "ebitda_usd":             ebt_usd,
-            "ebitda_margin_pct":      em_pct,
-            "loan_book_gross_usd":    loan_usd,
-            "net_yield_pct":          round(yld_raw * 100, 4) if yld_raw  is not None else None,
-            "par_30_pct":             round(p30_raw * 100, 4) if p30_raw  is not None else None,
-            "par_90_pct":             round(p90_raw * 100, 4) if p90_raw  is not None else None,
-            "active_clients_count":   int(ac)   if ac   is not None else None,
-            "unique_borrowers_count": int(uniq) if uniq is not None else None,
+            "fx_rate_to_usd":         ZAR_TO_USD,
+            "revenue_usd":            round(revenue_usd, 2),
+            "ebitda_usd":             round(ebitda_usd, 2) if ebitda_usd is not None else None,
+            "ebitda_margin_pct":      ebitda_margin,
+            "gross_margin_pct":       None,
+            "loan_book_gross_usd":    round(loan_book_usd, 2) if loan_book_usd is not None else None,
+            "net_yield_pct":          net_yield_pct,
+            "par_30_pct":             par_30_pct,
+            "par_90_pct":             par_90_pct,
+            "active_clients_count":   int(active_clients) if active_clients is not None else None,
+            "unique_borrowers_count": int(unique_smes) if unique_smes is not None else None,
+            "revenue_growth_pct":     None,
         })
 
     return results
