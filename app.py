@@ -6380,6 +6380,305 @@ def _render_enza_exit_tab() -> None:
             )
 
 
+
+# ── SAVA custom exit tab ──────────────────────────────────────────────────────
+
+def _render_sava_exit_tab() -> None:
+    AMBER     = "#FFC107"
+    GREEN_DOT = "#D5FA94"
+    RED_DOT   = "#E57373"
+    EMPTY     = "#D4D5CE"
+
+    def _pathway_card(title, valuation, description, feasibility_dots, tag, highlight=False):
+        border_extra = "border-left:3px solid #D5FA94;" if highlight else ""
+        dots_html = "".join(
+            f"<span style='display:inline-block;width:10px;height:10px;border-radius:50%;"
+            f"background:{d};margin-right:3px'></span>"
+            for d in feasibility_dots
+        )
+        rev_line = (
+            f"<div style='font-size:12px;color:{MUTED};margin-top:2px'>{valuation[1]}</div>"
+            if len(valuation) > 1 else ""
+        )
+        return f"""
+<div style='background:#FFFFFF;border:1px solid #D4D5CE;{border_extra}border-radius:8px;
+     padding:16px;height:100%'>
+  <div style='font-size:14px;font-weight:700;color:#2C2C2A;margin-bottom:4px'>{title}</div>
+  <div style='font-size:10px;color:#93A3A1;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px'>Valuation</div>
+  <div style='font-size:13px;color:#2C2C2A'>{valuation[0]}</div>
+  {rev_line}
+  <div style='font-size:12px;color:#93A3A1;font-style:italic;margin:6px 0 8px'>{description}</div>
+  <div style='margin:4px 0 8px'>{dots_html}</div>
+  <span style='font-size:11px;font-weight:600;color:{MUTED};background:#EFF0EA;
+    border-radius:4px;padding:2px 7px'>{tag}</span>
+</div>"""
+
+    pathways = [
+        (
+            "Strategic Sale — Local (Bank or Telco)",
+            ["$40–80M", "10–20x revenue"],
+            "Acquisition by a SA bank or telco seeking the SARB banking licence as a fast-track into SME banking. Most realistic near-term path — licence scarcity creates premium above pure financial multiples.",
+            [GREEN_DOT, GREEN_DOT, GREEN_DOT], "Most likely — 18–36 months", True,
+        ),
+        (
+            "Consolidation with Yoco or Lula",
+            ["$30–60M", "based on contribution"],
+            "Merger with Yoco (payments) or Lula (lending) to form a full-stack SA SME challenger — Sava contributes the banking licence, spend management rails, and credit infrastructure.",
+            [AMBER, GREEN_DOT, AMBER], "Possible — alignment difficult", False,
+        ),
+        (
+            "Strategic Sale — Global (SaaS or Fintech)",
+            ["$50–100M", "10–20x revenue"],
+            "Acquisition by a global SaaS or fintech player using Sava as a licence-backed Africa entry point — Xero and Sage are most credible given existing SA presence and product adjacency.",
+            [AMBER, AMBER, EMPTY], "Longer horizon — low near-term probability", False,
+        ),
+        (
+            "Remain Independent — Raise Series A",
+            ["$20–40M valuation"],
+            "Continue scaling the SME spend management and banking platform independently, leveraging the licence for partnerships with banks and telcos while building toward a stronger exit story.",
+            [AMBER, AMBER, EMPTY], "Current trajectory", False,
+        ),
+    ]
+
+    with st.expander("Exit Pathways — click to expand", expanded=False):
+        row1, row2 = st.columns(2), st.columns(2)
+        for idx, (title, val, desc, dots, tag, highlight) in enumerate(pathways):
+            col = row1[idx] if idx < 2 else row2[idx - 2]
+            with col:
+                st.markdown(_pathway_card(title, val, desc, dots, tag, highlight), unsafe_allow_html=True)
+                st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 2: Acquirer Universe ─────────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 12px 0;letter-spacing:.3px'>Acquirer Universe — Prioritized</div>",
+        unsafe_allow_html=True,
+    )
+
+    FIT_COLORS = {
+        "Very High":  ("#D5FA94", "#2C2C2A"),
+        "High":       ("#C5E5FF", "#1565C0"),
+        "Medium":     ("#D4D5CE", "#2C2C2A"),
+        "Low-Medium": ("#FFCDD2", "#B71C1C"),
+        "Low":        ("#FFCDD2", "#B71C1C"),
+    }
+
+    def _fit_badge(fit):
+        bg, fg = FIT_COLORS.get(fit, ("#D4D5CE", "#2C2C2A"))
+        return (
+            f"<span style='background:{bg};color:{fg};font-size:11px;font-weight:600;"
+            f"border-radius:4px;padding:2px 7px;margin-left:6px'>{fit}</span>"
+        )
+
+    def _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=0):
+        row_bg = "#EFF0EA" if row_idx % 2 == 0 else "#FFFFFF"
+        with st.container():
+            st.markdown(
+                f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
+                unsafe_allow_html=True,
+            )
+            cols = st.columns([2, 2, 3, 1, 2])
+            with cols[0]:
+                st.markdown(
+                    f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"{_fit_badge(fit)}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[1]:
+                st.markdown(
+                    f"<div style='font-size:12px;color:{MUTED};padding-top:8px'>{activity}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[2]:
+                st.markdown(
+                    f"<div style='font-size:13px;color:#2C2C2A;padding-top:6px'>{rationale}</div>",
+                    unsafe_allow_html=True,
+                )
+            with cols[3]:
+                st.checkbox("", key=key)
+            with cols[4]:
+                if affinity_cache is None:
+                    st.markdown(
+                        f"<div style='font-size:11px;color:{MUTED};padding-top:8px'>Sync Affinity above</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    note = affinity_cache.get(name)
+                    if note is None:
+                        st.markdown(
+                            f"<div style='font-size:11px;color:{MUTED};font-style:italic;padding-top:8px'>Not in Affinity</div>",
+                            unsafe_allow_html=True,
+                        )
+                    elif note.get("stale"):
+                        st.markdown(
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
+                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            unsafe_allow_html=True,
+                        )
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    local_buyers = [
+        ("Capitec", "Very High",
+         "Acquired Walletdoc R400M (Dec 2025); partnered with Stub for SME accounting",
+         "Sava's SARB licence and SME spend management rails complete Capitec's business banking buildout — they have payments (Walletdoc) but lack a licensed SME banking and credit infrastructure layer."),
+        ("Vodacom", "Very High",
+         "R34B fintech revenue FY2025; VodaPay SME strategy active",
+         "Sava's banking licence is worth more to Vodacom than to any SA bank — it gives them a regulated SME banking shortcut that would otherwise take years and hundreds of millions to build organically."),
+        ("Old Mutual (OM Bank)", "High",
+         "OM Bank launched 2025; targeting 2.5–3M customers by 2028",
+         "OM Bank is building fast but lacks SME-specific spend management and BaaS rails. Sava's licence and platform would accelerate their business banking expansion ahead of the 2028 profitability target."),
+        ("MTN", "High",
+         "MoMo SA traction weak vs other markets; SME banking gap clear",
+         "MTN's SA fintech story is underdeveloped relative to its other markets. Sava's licence and SME-first platform gives MTN a credible SA business banking entry point alongside MoMo consumer services."),
+        ("FNB / FirstRand", "Medium",
+         "Scaling SME payments and digital business services",
+         "FNB already serves a large SA SME base but has limited spend management and challenger brand capability. Sava's tech stack could run as an FNB white-label or challenger brand for digitally-native SMEs."),
+        ("TymeBank", "Medium",
+         "Acquired Retail Capital (2022); unicorn status ($1.5B) Dec 2024",
+         "Tyme is building the full SME financial OS — credit (Retail Capital) plus banking. Sava's spend management and SARB licence adds the missing expense management and regulatory depth layer."),
+        ("Absa", "Medium",
+         "Digitising retail and SME banking across Africa",
+         "Absa's SME banking product is lagging Capitec and Tyme. Sava's challenger brand positioning and tech rails could give Absa a faster path to SME-native banking without rebuilding from scratch."),
+    ]
+
+    global_buyers = [
+        ("Xero", "High",
+         "Acquired Cape Town-based Syft Analytics (2024)",
+         "Xero already acquires SA fintechs and integrates with Yoco. Adding Sava's banking licence and spend management layer would let Xero offer SA SMEs a complete accounting-plus-banking stack — a natural product extension."),
+        ("Sage", "High",
+         "Dominant SA SME software player; adding payments and banking globally",
+         "Sage has deep SA SME roots and is building out financial services beyond accounting. Sava gives Sage a licence-backed route to offer banking, payments, and credit alongside its existing SA software suite."),
+        ("Stripe", "Low-Medium",
+         "Africa presence via Paystack (Nigeria); limited SA footprint",
+         "Stripe's SA story is thin. Sava's SARB licence and SME banking rails could accelerate their SA expansion, but appetite for a second Africa market-entry acquisition remains uncertain."),
+        ("Adyen", "Low-Medium",
+         "Scaling enterprise acquiring globally; limited SA SME focus",
+         "Adyen's SA operations are enterprise-focused. Sava would require a meaningful strategic pivot toward SME banking — possible but not a near-term priority."),
+    ]
+
+    consolidation_buyers = [
+        ("Yoco", "High",
+         "Scaling Yoco Capital; approaching EBITDA breakeven",
+         "Sava contributes the SARB banking licence and spend management rails that Yoco needs to complete its neobank buildout — combined entity becomes SA's first full-stack SME financial OS."),
+        ("Lulalend (Lula)", "High",
+         "Strategic process active; Series C or trade sale being explored",
+         "Lula's credit platform plus Sava's banking licence and spend management creates a complete SME bank. Logic is strong but alignment remains difficult given each company's independent investor timelines."),
+    ]
+
+    all_buyer_names = (
+        [b[0] for b in local_buyers]
+        + [b[0] for b in global_buyers]
+        + [b[0] for b in consolidation_buyers]
+    )
+
+    affinity_cache = st.session_state.get("sava_affinity_data")
+    _, _sync_btn_col = st.columns([6, 1])
+    with _sync_btn_col:
+        if st.button("Sync Affinity", key="sava_affinity_sync"):
+            _api_key = st.secrets.get("AFFINITY_API_KEY", "")
+            with st.spinner("Fetching Affinity data for all buyers…"):
+                st.session_state["sava_affinity_data"] = {
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    for bname in all_buyer_names
+                }
+            st.rerun()
+
+    _HDR_STYLE = (
+        f"font-size:10px;font-weight:700;color:#93A3A1;"
+        f"text-transform:uppercase;letter-spacing:.5px;padding-bottom:4px"
+    )
+
+    def _header_row():
+        hcols = st.columns([2, 2, 3, 1, 2])
+        labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage?", "Last Affinity Contact"]
+        for hc, lbl in zip(hcols, labels):
+            with hc:
+                st.markdown(f"<div style='{_HDR_STYLE}'>{lbl}</div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:2px;background:#EFF0EA;margin-bottom:8px'></div>", unsafe_allow_html=True)
+
+    tab_local, tab_global, tab_consolidation = st.tabs(["Local Buyers", "Global Buyers", "Consolidation"])
+
+    with tab_local:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(local_buyers):
+            key = "engage_sava_local_" + name.replace(" ", "").replace("(", "").replace(")", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+
+    with tab_global:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(global_buyers):
+            key = "engage_sava_global_" + name.replace(" ", "").replace("(", "").replace(")", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+
+    with tab_consolidation:
+        _header_row()
+        for idx, (name, fit, activity, rationale) in enumerate(consolidation_buyers):
+            key = "engage_sava_consol_" + name.replace(" ", "").replace("(", "").replace(")", "")
+            _buyer_row(name, fit, activity, rationale, key, affinity_cache, row_idx=idx)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    # ── Section 3: Next Steps Generator ──────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:13px;font-weight:500;color:{MUTED};"
+        f"margin:20px 0 4px 0;letter-spacing:.3px'>Next Steps Generator</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:14px'>"
+        "Tick buyers to re-engage above, then generate a prioritized outreach plan.</div>",
+        unsafe_allow_html=True,
+    )
+
+    _BUYER_ACTIONS = {
+        "Capitec":              "Request meeting with Capitec Business Banking leadership. Frame Sava as the SME spend management and licensed banking layer that completes their post-Walletdoc buildout.",
+        "Vodacom":              "Approach via VodaPay strategy team. Position Sava's SARB licence as a regulated SME banking shortcut that accelerates Vodacom's SA business banking ambitions by 3–5 years.",
+        "Old Mutual (OM Bank)": "Engage OM Bank CEO and strategy team directly. Frame as accelerating their 2028 profitability target by adding SME business banking without building from scratch.",
+        "MTN":                  "Approach via MTN SA Fintech team. Position as the missing SA SME banking chapter in MTN's African fintech story — complements MoMo consumer services with a regulated business offering.",
+        "FNB / FirstRand":      "Engage via Quona's FirstRand network. Frame as a challenger brand play — Sava runs as a separate SME-native brand within FirstRand's ecosystem.",
+        "TymeBank":             "Approach TymeBank CEO directly. Frame as the spend management and SARB licence layer that completes the Tyme SME financial OS post-Retail Capital.",
+        "Absa":                 "Engage Absa Digital and Strategy team. Frame as a faster path to SME challenger banking than internal build given Capitec and Tyme pressure.",
+        "Xero":                 "Warm intro via Quona or Syft relationship — Xero is already acquiring SA fintechs. Frame as adding banking and spend management to Xero's SA accounting stack.",
+        "Sage":                 "Engage Sage SA leadership. Frame as completing Sage's SA SME financial OS — accounting, payroll, banking, and credit from one platform.",
+        "Yoco":                 "Initiate consolidation conversation via board. Frame as the fastest path to a neobank narrative — Sava's licence removes Yoco's biggest structural gap.",
+        "Lulalend (Lula)":      "Engage via Quona board relationship. Frame as creating SA's first full-stack SME bank — Lula credit plus Sava licence and spend management.",
+    }
+
+    if st.button("Generate Exit Actions for SAVA"):
+        ticked = []
+        for name in all_buyer_names:
+            for prefix in ["engage_sava_local_", "engage_sava_global_", "engage_sava_consol_"]:
+                key = prefix + name.replace(" ", "").replace("(", "").replace(")", "")
+                if st.session_state.get(key, False):
+                    ticked.append(name)
+                    break
+
+        st.markdown("#### Strategic Acquisition Outreach")
+        if ticked:
+            for name in ticked:
+                action = _BUYER_ACTIONS.get(name, f"Schedule introductory strategic conversation with {name} via Quona network.")
+                st.markdown(
+                    f"<div style='padding:10px 14px;margin-bottom:8px;background:#FFFFFF;"
+                    f"border:1px solid #D4D5CE;border-radius:8px'>"
+                    f"<span style='font-weight:700;color:#2C2C2A'>{name}</span>"
+                    f"<span style='color:#2C2C2A;margin-left:10px'>{action}</span></div>",
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown(
+                f"<div style='color:{MUTED};font-size:13px'>Tick at least one buyer above to generate actions.</div>",
+                unsafe_allow_html=True,
+            )
+
+
 # ── Exit Tracking tab ─────────────────────────────────────────────────────────
 
 def render_exit_tab(info: pd.Series, company_id: int) -> None:
@@ -6391,6 +6690,11 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
     # ── Enza custom exit tab ───────────────────────────────────────────────────
     if company_name == "Enza":
         _render_enza_exit_tab()
+        return
+
+    # ── SAVA custom exit tab ────────────────────────────────────────────────────
+    if company_name == "SAVA":
+        _render_sava_exit_tab()
         return
 
     # ── Cowrywise custom exit tab ──────────────────────────────────────────────
