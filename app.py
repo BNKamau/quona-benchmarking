@@ -7847,7 +7847,16 @@ if st.session_state.page == "home":
         filtered = filtered[filtered["sector"].apply(sector_label) == selected_sector]
     filtered = filtered[filtered["name"].str.contains(st.session_state.get("company_search", ""), case=False, na=False)]
 
-    filtered = filtered.sort_values("name")
+    EXIT_READY_PRIORITY = ["Yoco", "Cowrywise", "Lulalend", "Verto", "MaxSoko"]
+
+    filtered = filtered.copy()
+    filtered["_sort_primary"] = filtered["name"].apply(lambda n: 0 if n in EXIT_READY_PRIORITY else 1)
+    filtered["_sort_secondary"] = filtered["name"].apply(
+        lambda n: EXIT_READY_PRIORITY.index(n) if n in EXIT_READY_PRIORITY else 999
+    )
+    filtered = filtered.sort_values(["_sort_primary", "_sort_secondary", "name"]).drop(
+        columns=["_sort_primary", "_sort_secondary"]
+    )
 
     n_showing = len(filtered)
     st.markdown(
@@ -7969,7 +7978,21 @@ if st.session_state.page == "home":
                     unsafe_allow_html=True,
                 )
 
-                # ── Header: name + sector tag ─────────────────────────────
+                # ── Header: name + fund tag + sector tag ─────────────────
+                fund_val  = str(row.get("fund", "") or "")
+                FUND_COLORS = {
+                    "Fund I":   ("#D5FA94", "#2C2C2A"),
+                    "Fund II":  ("#C5E5FF", "#2C2C2A"),
+                    "Fund III": ("#EFF0EA", "#93A3A1"),
+                }
+                fund_bg, fund_fg = FUND_COLORS.get(fund_val, (None, None))
+                fund_tag_html = (
+                    f"<span style='background:{fund_bg};color:{fund_fg};border-radius:99px;"
+                    f"padding:3px 10px;font-size:10px;font-weight:700;letter-spacing:.04em;"
+                    f"white-space:nowrap;display:inline-block;margin-top:4px'>{fund_val}</span>"
+                    if fund_bg else ""
+                )
+
                 st.markdown(
                     f"<div style='display:flex;justify-content:space-between;"
                     f"align-items:flex-start;margin-bottom:2px'>"
@@ -7979,6 +8002,7 @@ if st.session_state.page == "home":
                     f"<div style='font-size:12px;font-weight:600;color:{BLACK};"
                     f"text-transform:uppercase;letter-spacing:.06em;margin-top:2px'>"
                     f"{country}</div>"
+                    f"{fund_tag_html}"
                     f"</div>"
                     f"<span style='background:{BLUE};color:{BLACK};border-radius:99px;"
                     f"padding:4px 12px;font-size:11px;font-weight:700;"
