@@ -7847,7 +7847,7 @@ if st.session_state.page == "home":
         filtered = filtered[filtered["sector"].apply(sector_label) == selected_sector]
     filtered = filtered[filtered["name"].str.contains(st.session_state.get("company_search", ""), case=False, na=False)]
 
-    EXIT_READY_PRIORITY = ["Yoco", "Cowrywise", "Lulalend", "Verto", "MaxSoko"]
+    EXIT_READY_PRIORITY = ["Yoco", "Cowrywise", "Lulalend", "VertoFX", "MaxSoko"]
 
     filtered = filtered.copy()
     filtered["_sort_primary"] = filtered["name"].apply(lambda n: 0 if n in EXIT_READY_PRIORITY else 1)
