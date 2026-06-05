@@ -7934,12 +7934,13 @@ if st.session_state.page == "home":
 
     # ── Filter bar ────────────────────────────────────────────────────────────
     all_sectors = sorted(companies["sector"].dropna().unique().tolist())
-    sector_options = ["All"] + [sector_label(s) for s in all_sectors]
+    sector_options = ["All"] + [sector_label(s) for s in all_sectors if s and sector_label(s) and sector_label(s).lower() != "none"]
 
+    _fund_options = ["All Funds"] + sorted([f for f in companies["fund"].dropna().unique() if f])
     st.markdown("<div style='font-size:11px;font-weight:700;color:#93A3A1;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px'>Fund</div>", unsafe_allow_html=True)
     selected_fund = st.radio(
         "Filter by fund",
-        options=["All Funds", "Fund I", "Fund II", "Fund III"],
+        options=_fund_options,
         index=0,
         horizontal=True,
         label_visibility="collapsed",
@@ -8613,7 +8614,7 @@ elif st.session_state.page == "detail":
                 _section_header("Lending KPIs (Latest Period)")
                 snap_cols = st.columns(len(snapshot_vals))
                 for col, (lbl, val_str) in zip(snap_cols, snapshot_vals):
-                    col.metric(lbl, val_str)
+                    col.metric(lbl, val_str if val_str is not None else "—")
 
         # ── Lending & credit metrics ──────────────────────────────────────────
         LENDING_METRICS = [
