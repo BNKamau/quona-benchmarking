@@ -1389,46 +1389,6 @@ def render_benchmarking_tab(
                     unsafe_allow_html=True,
                 )
 
-            st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-            c5, c6, c7, c8 = st.columns(4)
-            with c5:
-                st.markdown(
-                    _kh_card(
-                        "Active Users",
-                        fmt_int(_kh_ac) if _kh_ac else "—",
-                        f"<div style='font-size:12px;color:{MUTED};margin-top:5px'>Workers / borrowers</div>",
-                    ),
-                    unsafe_allow_html=True,
-                )
-            with c6:
-                st.markdown(
-                    _kh_card(
-                        "Revenue (Latest Period)",
-                        fmt_usd(_kh_rev_lt) if _kh_rev_lt else "—",
-                        f"<div style='font-size:12px;color:{MUTED};margin-top:5px'>Most recent filing period</div>",
-                    ),
-                    unsafe_allow_html=True,
-                )
-            with c7:
-                st.markdown(
-                    _kh_card(
-                        "ARR",
-                        fmt_usd(_kh_arr) if _kh_arr else "—",
-                        f"<div style='font-size:12px;color:{MUTED};margin-top:5px'>Annualised run-rate</div>",
-                    ),
-                    unsafe_allow_html=True,
-                )
-            with c8:
-                st.markdown(
-                    _kh_card(
-                        "History",
-                        f"{_kh_hist} periods",
-                        f"<div style='font-size:12px;color:{MUTED};margin-top:5px'>"
-                        f"{_KH_N_COMPS} comps in set</div>",
-                    ),
-                    unsafe_allow_html=True,
-                )
-
             st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
             # ── Section 2: Gap analysis (left) + Radar chart (right) ──────────
