@@ -1656,49 +1656,85 @@ def render_benchmarking_tab(
                     unsafe_allow_html=True,
                 )
 
-            # ── Comp set reference cards ───────────────────────────────────────
+            # ── Comp set reference table ───────────────────────────────────────
             st.markdown(
                 f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
                 f"color:{MUTED};font-weight:600;margin-bottom:12px'>Comp Set — EWA and Digital Workforce Banking</div>",
                 unsafe_allow_html=True,
             )
-            _KH_COMPS = [
-                ("Payfare",    "EWA / Gig Banking",         "Acquired by Fiserv", "Dec 2024", "$147M",         "~0.6x rev", "Pure-play EWA + gig banking. 90% premium to last share price. Only listed EWA pure-play."),
-                ("DailyPay",   "Employer-paid B2B EWA",     "Private (Pre-IPO)",  "—",        "$1.75B (2024)", "~7x rev",   "6M employees. Chime offered $2B in 2022; IPO eyeing $3–4B."),
-                ("Wagestream", "EWA / Workforce Finance",   "Investor (Stake)",   "—",        "~$300M+ est.",  "—",         "Already holds Khazna stake. Global EWA portfolio (Refyne, GajiGesa). Most important signal."),
+            _KH_CONF_DOT  = {"high": "#2E7D32", "medium": "#F57C00", "low": "#C62828"}
+            _KH_REL_COLORS = {
+                5: (GREEN,     BLACK),
+                4: ("#D9F0D9", "#2E7D32"),
+                3: ("#FFF9C4", "#795548"),
+                2: ("#EFEBE9", MUTED),
+                1: ("#F5F5F5", MUTED),
+            }
+            _KH_ET_COLORS = {
+                "acquisition":       ("#C5E5FF", "#1565C0"),
+                "financial sponsor": ("#D4D5CE", "#2C2C2A"),
+                "ipo":               ("#D5FA94", "#2C2C2A"),
+            }
+            # (co, sub_sector, geo, et_label, et_key, is_clean, year, rev, gm, em, ev_rev, rel, conf)
+            _KH_ROWS = [
+                ("Payfare",    "EWA / Gig Banking",       "North America", "Financial Sponsor", "financial sponsor", True,  "2024", "$147M",       "26.0%", "15.0%", "0.6x",        4, "high"),
+                ("DailyPay",   "EWA / Workforce Finance", "North America", "Pre-Exit (Pre-IPO)","pre-exit",          False, "—",    "—",           "—",     "—",     "~7x rev est.", 3, "medium"),
+                ("Wagestream", "EWA / Workforce Finance", "Europe",        "Investor (Stake)",  "investor",          True,  "—",    "~$300M val.", "—",     "—",     "—",            5, "medium"),
             ]
-            _kh_hdr_style = (
-                "font-size:10px;font-weight:700;color:#93A3A1;text-transform:uppercase;"
-                "letter-spacing:.5px;padding:8px 12px"
-            )
-            _kh_cols_w = "1fr 1.2fr 1fr 0.7fr 1fr 0.7fr 2fr"
-            _kh_hdrs   = ["Company", "Type", "Status", "Date", "Valuation", "Multiple", "Notes"]
-            _kh_header_html = (
-                f"<div style='display:grid;grid-template-columns:{_kh_cols_w};"
-                f"border-bottom:2px solid {BORDER};margin-bottom:4px'>"
-                + "".join(f"<div style='{_kh_hdr_style}'>{h}</div>" for h in _kh_hdrs)
-                + "</div>"
+            _kh_hdr_html = "".join(
+                f"<th style='padding:8px 12px;text-align:left;font-size:10px;text-transform:uppercase;"
+                f"letter-spacing:.5px;color:{MUTED};border-bottom:2px solid {BORDER};white-space:nowrap;"
+                f"width:{w}'>{h}</th>"
+                for h, w in [
+                    ("Company", "18%"), ("Sub-sector", "14%"), ("Geography", "8%"),
+                    ("Exit Type", "10%"), ("Year", "5%"),
+                    ("Rev at Exit", "8%"), ("Gross Margin", "8%"), ("EBITDA Margin", "8%"),
+                    ("EV/Rev", "8%"), ("Relevance", "7%"), ("Conf.", "6%"),
+                ]
             )
             _kh_rows_html = ""
-            for _i, (_co, _typ, _cst, _dt, _vl, _mu, _nt) in enumerate(_KH_COMPS):
-                _bg   = WHITE if _i % 2 == 0 else "#F9FAF7"
-                _cell = f"font-size:12px;color:{MUTED};padding:8px 12px;line-height:1.5"
+            for _idx, (_co, _sub, _geo, _et_label, _et_key, _is_clean, _yr, _rev, _gm, _em, _ev, _rel, _conf) in enumerate(_KH_ROWS):
+                _row_bg   = WHITE if _idx % 2 == 0 else "#F9FAF7"
+                _cell     = f"padding:8px 12px;font-size:13px;color:{MUTED}"
+                _bg_r, _fg_r = _KH_REL_COLORS.get(_rel, ("#F5F5F5", MUTED))
+                _conf_c   = _KH_CONF_DOT.get(_conf, MUTED)
+                if not _is_clean:
+                    _et_html = (
+                        f"<span style='font-size:11px;color:{MUTED};font-style:italic'>"
+                        f"Pre-exit / funding mark</span>"
+                    )
+                else:
+                    _et_bg, _et_fg = _KH_ET_COLORS.get(_et_key, ("#D4D5CE", "#2C2C2A"))
+                    _et_html = (
+                        f"<span style='background:{_et_bg};color:{_et_fg};border-radius:4px;"
+                        f"padding:2px 7px;font-size:11px;font-weight:600;white-space:normal'>{_et_label}</span>"
+                    )
                 _kh_rows_html += (
-                    f"<div style='display:grid;grid-template-columns:{_kh_cols_w};background:{_bg};border-radius:4px'>"
-                    f"<div style='font-size:13px;font-weight:700;color:{BLACK};padding:8px 12px'>{_co}</div>"
-                    f"<div style='{_cell}'>{_typ}</div>"
-                    f"<div style='font-size:12px;color:{BLACK};font-weight:600;padding:8px 12px'>{_cst}</div>"
-                    f"<div style='{_cell}'>{_dt}</div>"
-                    f"<div style='font-size:13px;color:{BLACK};font-weight:600;padding:8px 12px'>{_vl}</div>"
-                    f"<div style='font-size:12px;color:{GREEN};font-weight:600;padding:8px 12px'>{_mu}</div>"
-                    f"<div style='{_cell}'>{_nt}</div>"
-                    f"</div>"
+                    f"<tr style='background:{_row_bg}'>"
+                    f"<td style='padding:8px 12px;font-size:13px;font-weight:700;color:{BLACK}'>{_co}</td>"
+                    f"<td style='{_cell}'>{_sub}</td>"
+                    f"<td style='{_cell}'>{_geo}</td>"
+                    f"<td style='padding:8px 12px'>{_et_html}</td>"
+                    f"<td style='{_cell}'>{_yr}</td>"
+                    f"<td style='padding:8px 12px;font-size:13px;color:{BLACK};font-weight:500'>{_rev}</td>"
+                    f"<td style='{_cell}'>{_gm}</td>"
+                    f"<td style='{_cell}'>{_em}</td>"
+                    f"<td style='padding:8px 12px;font-size:13px;color:{BLACK};font-weight:500'>{_ev}</td>"
+                    f"<td style='padding:8px 12px'>"
+                    f"<span style='background:{_bg_r};color:{_fg_r};border-radius:4px;"
+                    f"padding:2px 8px;font-size:11px;font-weight:600'>{_rel}/5</span></td>"
+                    f"<td style='padding:8px 12px;text-align:center'>"
+                    f"<span style='display:inline-block;width:10px;height:10px;"
+                    f"border-radius:50%;background:{_conf_c}'></span></td>"
+                    f"</tr>"
                 )
             st.markdown(
                 f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
-                f"padding:16px 4px;overflow:hidden'>"
-                + _kh_header_html + _kh_rows_html
-                + "</div>",
+                f"overflow:auto;margin-bottom:8px'>"
+                f"<table style='width:100%;border-collapse:collapse'>"
+                f"<thead><tr style='background:{BG}'>{_kh_hdr_html}</tr></thead>"
+                f"<tbody>{_kh_rows_html}</tbody>"
+                f"</table></div>",
                 unsafe_allow_html=True,
             )
             st.markdown(
