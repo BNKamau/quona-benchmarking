@@ -65,6 +65,34 @@ class _SQLiteShim:
     def __exit__(self, *_): self._c.close()
 
 
+class _PgConn:
+    """psycopg2 connection wrapper that adds .execute() returning a cursor,
+    matching the sqlite3 / _SQLiteShim interface so all call sites are
+    unchanged: conn.execute(sql, params).fetchone() works as expected."""
+
+    def __init__(self, url: str):
+        self._c = psycopg2.connect(url, connect_timeout=10)
+        self._c.autocommit = False
+
+    def cursor(self):
+        return self._c.cursor()
+
+    def execute(self, sql, params=None):
+        cur = self._c.cursor()
+        cur.execute(sql, params) if params else cur.execute(sql)
+        return cur
+
+    def executemany(self, sql, seq):
+        cur = self._c.cursor()
+        cur.executemany(sql, seq)
+        cur.close()
+
+    def commit(self):    self._c.commit()
+    def close(self):     self._c.close()
+    def __enter__(self): return self
+    def __exit__(self, *_): self._c.close()
+
+
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Quona Portfolio Dashboard",
@@ -200,9 +228,7 @@ def _get_pg_conn():
     a compatibility shim if SUPABASE_DB_URL is not in secrets (local dev)."""
     url = st.secrets.get("SUPABASE_DB_URL", "")
     if url:
-        conn = psycopg2.connect(url, connect_timeout=10)
-        conn.autocommit = False
-        return conn
+        return _PgConn(url)
     return _SQLiteShim(DB_PATH)
 
 def _conn():
