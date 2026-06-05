@@ -7934,7 +7934,13 @@ if not st.user.is_logged_in:
                       Portfolio Intelligence Platform</div>
         </div>
         """, unsafe_allow_html=True)
-        st.button("Sign in with Google", on_click=st.login, use_container_width=True, type="primary")
+        st.button(
+            "Sign in with Google",
+            on_click=st.login,
+            args=("google",),
+            use_container_width=True,
+            type="primary",
+        )
         st.markdown(
             "<div style='text-align:center;font-size:12px;color:#93A3A1;"
             "margin-top:16px'>Restricted to @quona.com accounts</div>",
