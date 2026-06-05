@@ -8322,7 +8322,8 @@ elif st.session_state.page == "detail":
     m6.metric("History", f"{len(kpis)} periods  ·  {date_range}")
 
     _has_upload = info["name"] in SUPPORTED_COMPANIES
-    _tab_names  = ["Performance", "Benchmarking", "Exit Tracking"] + (["Upload Data"] if _has_upload else [])
+    _tab_names  = [t for t in ["Performance", "Benchmarking", "Exit Tracking",
+                                "Upload Data" if _has_upload else None] if t is not None]
     _tabs       = st.tabs(_tab_names)
     tab_perf    = _tabs[0]
     tab_bench   = _tabs[1]
