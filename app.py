@@ -956,7 +956,9 @@ SECTOR_LABELS = {
 }
 
 def sector_label(s: str) -> str:
-    return SECTOR_LABELS.get(s, (s or "").replace("_", " ").title())
+    if not s or str(s).lower() == "none":
+        return ""
+    return SECTOR_LABELS.get(s, s.replace("_", " ").title())
 
 # ── Benchmarking helpers ───────────────────────────────────────────────────────
 def _parse_pct(s) -> float | None:
@@ -7936,7 +7938,7 @@ if st.session_state.page == "home":
     all_sectors = sorted(companies["sector"].dropna().unique().tolist())
     sector_options = ["All"] + [sector_label(s) for s in all_sectors if s and sector_label(s) and sector_label(s).lower() != "none"]
 
-    _fund_options = ["All Funds"] + sorted([f for f in companies["fund"].dropna().unique() if f])
+    _fund_options = ["All Funds"] + sorted([f for f in companies["fund"].dropna().unique() if f and str(f).lower() != "none"])
     st.markdown("<div style='font-size:11px;font-weight:700;color:#93A3A1;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px'>Fund</div>", unsafe_allow_html=True)
     selected_fund = st.radio(
         "Filter by fund",
@@ -8242,7 +8244,7 @@ elif st.session_state.page == "detail":
     ltm_row = ltm_df[ltm_df["id"] == company_id]
     ltm_val = float(ltm_row.iloc[0]["ltm_revenue"]) if not ltm_row.empty and not _is_null(ltm_row.iloc[0]["ltm_revenue"]) else None
     _raw_ltm_lbl = ltm_row.iloc[0].get("ltm_label") if not ltm_row.empty else None
-    ltm_lbl = str(_raw_ltm_lbl) if not _is_null(_raw_ltm_lbl) else "—"
+    ltm_lbl = str(_raw_ltm_lbl) if not _is_null(_raw_ltm_lbl) and str(_raw_ltm_lbl).lower() not in ("none", "") else "—"
 
     sl      = sector_label(info["sector"])
     founded = (
