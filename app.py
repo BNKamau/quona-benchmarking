@@ -426,22 +426,6 @@ def _init_db() -> None:
 if not st.secrets.get("SUPABASE_DB_URL", ""):
     _init_db()
 
-# ── TEMPORARY DB DIAGNOSTIC — remove after confirming path ────────────────────
-def _db_debug_banner():
-    try:
-        conn = _conn()
-        n_kpi = conn.execute("SELECT COUNT(*) FROM kpi_snapshots").fetchone()[0]
-        n_co  = conn.execute("SELECT COUNT(*) FROM companies").fetchone()[0]
-        conn.close()
-    except Exception as e:
-        n_kpi, n_co = f"ERR:{e}", "?"
-    st.sidebar.markdown(
-        f"**DB path:** `{DB_PATH}`  \n"
-        f"**kpi_snapshots:** {n_kpi} rows | **companies:** {n_co} rows",
-        unsafe_allow_html=False,
-    )
-# ── END DIAGNOSTIC ────────────────────────────────────────────────────────────
-
 # ── Exit comps DB helpers ──────────────────────────────────────────────────────
 COMPS_DB = os.path.join(_HERE, "data", "quona_exit_comps.db")
 _COMP_NAME_MAP = {"VertoFX": "Verto FX"}  # benchmarking.db name → portfolio_comp_mapping name
@@ -7855,10 +7839,6 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
                 )
                 st.success("Actions saved.")
 
-
-# ── TEMPORARY DB DIAGNOSTIC (remove after confirming path) ───────────────────
-_db_debug_banner()
-# ── END DIAGNOSTIC ────────────────────────────────────────────────────────────
 
 # ── Session state ─────────────────────────────────────────────────────────────
 if "page" not in st.session_state:
