@@ -4,4 +4,5 @@ pandas
 openpyxl
 anthropic
 requests
+psycopg2-binary>=2.9.0
 # libsql-experimental>=0.3.0  # optional: uncomment if building on Linux with Rust toolchain

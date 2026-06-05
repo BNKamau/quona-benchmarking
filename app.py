@@ -1,6 +1,7 @@
 import streamlit as st
 import sqlite3
-import base64 as _b64
+import psycopg2
+import psycopg2.extras
 import pandas as pd
 import plotly.graph_objects as go
 import anthropic
@@ -8,158 +9,60 @@ import os
 from datetime import datetime, timedelta, timezone
 from parsers.excel_parsers import PARSERS, SUPPORTED_COMPANIES
 
-# ── Turso HTTP connection (replaces libsql; no native compilation needed) ─────
-class _TursoHTTPCursor:
-    """Minimal DBAPI2-compatible cursor backed by the Turso HTTP pipeline API."""
+# ── SQLite compatibility shim for local dev ────────────────────────────────────
+# Translates %s placeholders (psycopg2 style) to ? (sqlite3 style) so the
+# same SQL works against both Supabase and the local SQLite fallback.
 
-    def __init__(self, http_url, token):
-        self._url   = http_url
-        self._token = token
-        self.description = None
-        self.rowcount    = -1
-        self._rows: list = []
-        self._pos        = 0
+class _SQLiteShimCursor:
+    def __init__(self, cur):
+        self._cur = cur
 
     @staticmethod
-    def _encode_arg(val):
-        if val is None:
-            return {"type": "null", "value": None}
-        if isinstance(val, bool):
-            return {"type": "integer", "value": "1" if val else "0"}
-        if isinstance(val, int):
-            return {"type": "integer", "value": str(val)}
-        if isinstance(val, float):
-            return {"type": "float", "value": val}
-        if isinstance(val, bytes):
-            return {"type": "blob", "base64": _b64.b64encode(val).decode()}
-        return {"type": "text", "value": str(val)}
+    def _fix(sql):
+        return sql.replace("%s", "?")
 
-    @staticmethod
-    def _decode_val(cell):
-        t = cell.get("type")
-        v = cell.get("value")
-        if t == "null" or v is None:
-            return None
-        if t == "integer":
-            return int(v)
-        if t == "float":
-            try:
-                return float(v)
-            except (TypeError, ValueError):
-                return v
-        if t == "blob":
-            return _b64.b64decode(cell.get("base64", ""))
-        return v
-
-    def _pipeline(self, stmts):
-        import requests as _req
-        payload = [{"type": "execute", "stmt": s} for s in stmts] + [{"type": "close"}]
-        resp = _req.post(
-            self._url,
-            headers={"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"},
-            json={"requests": payload},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        return resp.json().get("results", [])
-
-    def execute(self, sql, parameters=None):
-        stmt: dict = {"sql": sql}
-        if parameters:
-            stmt["args"] = [self._encode_arg(p) for p in parameters]
-        results = self._pipeline([stmt])
-        r = results[0]
-        if r.get("type") == "error":
-            raise Exception(r["error"]["message"])
-        res = r["response"]["result"]
-        cols = res.get("cols", [])
-        self.description = (
-            [(c["name"], None, None, None, None, None, None) for c in cols] if cols else None
-        )
-        self._rows = [
-            tuple(self._decode_val(cell) for cell in row)
-            for row in res.get("rows", [])
-        ]
-        self.rowcount = res.get("affected_row_count", len(self._rows))
-        self._pos = 0
+    def execute(self, sql, params=None):
+        self._cur.execute(self._fix(sql), params or ())
         return self
 
-    def fetchall(self):
-        rows = self._rows[self._pos:]
-        self._pos = len(self._rows)
-        return rows
+    def fetchall(self):         return self._cur.fetchall()
+    def fetchone(self):         return self._cur.fetchone()
+    def fetchmany(self, n=1000): return self._cur.fetchmany(n)
+    def close(self):            self._cur.close()
+    def __iter__(self):         return iter(self._cur)
 
-    def fetchone(self):
-        if self._pos >= len(self._rows):
-            return None
-        row = self._rows[self._pos]
-        self._pos += 1
-        return row
+    @property
+    def description(self): return self._cur.description
 
-    def fetchmany(self, size=1000):
-        rows = self._rows[self._pos:self._pos + size]
-        self._pos += len(rows)
-        return rows
-
-    def close(self):
-        pass
-
-    def __iter__(self):
-        return iter(self._rows[self._pos:])
+    @property
+    def rowcount(self): return self._cur.rowcount
 
 
-class _TursoHTTPConnection:
-    """Minimal DBAPI2-compatible connection backed by the Turso HTTP pipeline API.
+class _SQLiteShim:
+    """sqlite3 connection wrapper that accepts psycopg2-style %s placeholders."""
 
-    Drop-in replacement for sqlite3.connect() — supports execute(), cursor(),
-    commit() (no-op; Turso auto-commits), close(), and the context manager protocol.
-    Compatible with pandas.read_sql_query().
-    """
+    def __init__(self, path):
+        self._c = sqlite3.connect(path, check_same_thread=False)
+        self._c.execute("PRAGMA journal_mode=WAL")
+        self._c.execute("PRAGMA synchronous=NORMAL")
 
-    def __init__(self, db_url: str, token: str):
-        # Accept both libsql:// and https:// URL schemes
-        self._http_url = db_url.replace("libsql://", "https://") + "/v2/pipeline"
-        self._token    = token
+    @staticmethod
+    def _fix(sql):
+        return sql.replace("%s", "?")
 
     def cursor(self):
-        return _TursoHTTPCursor(self._http_url, self._token)
+        return _SQLiteShimCursor(self._c.cursor())
 
-    def execute(self, sql, parameters=None):
-        cur = self.cursor()
-        cur.execute(sql, parameters)
-        return cur
+    def execute(self, sql, params=None):
+        return _SQLiteShimCursor(self._c.execute(self._fix(sql), params or ()))
 
-    def executemany(self, sql, seq_of_parameters):
-        import requests as _req
-        stmts = [
-            {"sql": sql, "args": [_TursoHTTPCursor._encode_arg(p) for p in params]}
-            for params in seq_of_parameters
-        ]
-        if not stmts:
-            return
-        # Batch into chunks to stay within Turso pipeline limits
-        for i in range(0, len(stmts), 50):
-            chunk   = stmts[i:i + 50]
-            payload = [{"type": "execute", "stmt": s} for s in chunk] + [{"type": "close"}]
-            resp = _req.post(
-                self._http_url,
-                headers={"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"},
-                json={"requests": payload},
-                timeout=60,
-            )
-            resp.raise_for_status()
+    def executemany(self, sql, seq):
+        self._c.executemany(self._fix(sql), seq)
 
-    def commit(self):
-        pass  # Turso HTTP API auto-commits each pipeline
-
-    def close(self):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_):
-        pass
+    def commit(self):    self._c.commit()
+    def close(self):     self._c.close()
+    def __enter__(self): return self
+    def __exit__(self, *_): self._c.close()
 
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -292,17 +195,18 @@ st.markdown(f"""
 _HERE    = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(_HERE, "benchmarking.db")
 
+def _get_pg_conn():
+    """Return a psycopg2 connection to Supabase. Falls back to local SQLite via
+    a compatibility shim if SUPABASE_DB_URL is not in secrets (local dev)."""
+    url = st.secrets.get("SUPABASE_DB_URL", "")
+    if url:
+        conn = psycopg2.connect(url, connect_timeout=10)
+        conn.autocommit = False
+        return conn
+    return _SQLiteShim(DB_PATH)
+
 def _conn():
-    """Return a connection to the benchmarking database.
-    Uses Turso when secrets are present; falls back to local SQLite for development."""
-    turso_url   = st.secrets.get("TURSO_BENCHMARKING_URL", "")
-    turso_token = st.secrets.get("TURSO_BENCHMARKING_TOKEN", "")
-    if turso_url and turso_token:
-        return _TursoHTTPConnection(turso_url, turso_token)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    return conn
+    return _get_pg_conn()
 
 # Companies that should always exist in the registry.
 # Seeded automatically on first startup so uploads work on a fresh install.
@@ -486,13 +390,15 @@ def _init_db() -> None:
                 INSERT INTO companies
                     (name, type, sector, sub_sector, hq_country, founded_year,
                      business_model, reporting_currency)
-                VALUES (?,?,?,?,?,?,?,?)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
             """, (name, typ, sector, sub_sector, hq, year, biz, currency))
         conn.commit()
     conn.close()
 
 
-_init_db()
+# Skip on Supabase — tables already exist; _init_db uses SQLite-only DDL syntax.
+if not st.secrets.get("SUPABASE_DB_URL", ""):
+    _init_db()
 
 # ── TEMPORARY DB DIAGNOSTIC — remove after confirming path ────────────────────
 def _db_debug_banner():
@@ -515,20 +421,14 @@ COMPS_DB = os.path.join(_HERE, "data", "quona_exit_comps.db")
 _COMP_NAME_MAP = {"VertoFX": "Verto FX"}  # benchmarking.db name → portfolio_comp_mapping name
 
 def _comps_conn():
-    """Return a connection to the exit comps database.
-    Uses Turso when secrets are present; falls back to local SQLite for development."""
-    turso_url   = st.secrets.get("TURSO_COMPS_URL", "")
-    turso_token = st.secrets.get("TURSO_COMPS_TOKEN", "")
-    if turso_url and turso_token:
-        return _TursoHTTPConnection(turso_url, turso_token)
-    return sqlite3.connect(COMPS_DB, check_same_thread=False)
+    return _get_pg_conn()
 
 @st.cache_data(ttl=300)
 def load_comp_mapping(company_name: str) -> pd.DataFrame:
     name = _COMP_NAME_MAP.get(company_name, company_name)
     return pd.read_sql_query(
         "SELECT comp_id, relevance_score, mapping_rationale "
-        "FROM portfolio_comp_mapping WHERE portfolio_company = ? "
+        "FROM portfolio_comp_mapping WHERE portfolio_company = %s "
         "ORDER BY relevance_score DESC",
         _comps_conn(), params=(name,),
     )
@@ -537,7 +437,7 @@ def load_comp_mapping(company_name: str) -> pd.DataFrame:
 def load_comps_detail(comp_ids: tuple) -> pd.DataFrame:
     if not comp_ids:
         return pd.DataFrame()
-    ph = ",".join("?" * len(comp_ids))
+    ph = ",".join(["%s"] * len(comp_ids))
     return pd.read_sql_query(f"""
         SELECT comp_id, company_name, sub_sector, geography,
                exit_status, exit_year, exit_type, exit_ev_usd_m,
@@ -554,7 +454,7 @@ def load_comps_detail(comp_ids: tuple) -> pd.DataFrame:
 def load_stage_snapshots(comp_ids: tuple) -> pd.DataFrame:
     if not comp_ids:
         return pd.DataFrame()
-    ph = ",".join("?" * len(comp_ids))
+    ph = ",".join(["%s"] * len(comp_ids))
     return pd.read_sql_query(f"""
         SELECT comp_id, company_name, stage, revenue_range_usd_m,
                revenue_growth_pct, gross_margin_pct, ebitda_margin_pct
@@ -804,7 +704,7 @@ def load_company_info(company_id: int, db_version: str = "") -> pd.Series:
     if _key in st.session_state:
         return st.session_state[_key]
     df = pd.read_sql_query(
-        "SELECT * FROM companies WHERE id = ?", _conn(), params=(company_id,)
+        "SELECT * FROM companies WHERE id = %s", _conn(), params=(company_id,)
     )
     result = df.iloc[0]
     st.session_state[_key] = result
@@ -831,7 +731,7 @@ def load_kpis(company_id: int, db_version: str = "") -> pd.DataFrame:
                    aum_usd, gmv_usd, tpv_usd,
                    unique_borrowers_count
             FROM kpi_snapshots
-            WHERE company_id = ?
+            WHERE company_id = %s
             ORDER BY period_end_date
         """, conn, params=(company_id,))
     finally:
@@ -882,7 +782,7 @@ def _kpi_last_updated(company_id: int) -> str:
     conn = _conn()
     try:
         row = conn.execute(
-            "SELECT MAX(updated_at) FROM kpi_snapshots WHERE company_id=?",
+            "SELECT MAX(updated_at) FROM kpi_snapshots WHERE company_id=%s",
             (company_id,),
         ).fetchone()
     finally:
@@ -909,7 +809,7 @@ def _ipo_readiness_load(company_id: int) -> dict:
     conn = _conn()
     try:
         rows = conn.execute(
-            "SELECT item_key, status, notes, updated_at FROM ipo_readiness WHERE company_id=?",
+            "SELECT item_key, status, notes, updated_at FROM ipo_readiness WHERE company_id=%s",
             (company_id,)
         ).fetchall()
     finally:
@@ -924,7 +824,7 @@ def _ipo_readiness_save(company_id: int, updates: dict) -> None:
         for item_key, data in updates.items():
             conn.execute(
                 "INSERT INTO ipo_readiness (company_id, item_key, status, notes, updated_at) "
-                "VALUES (?, ?, ?, ?, datetime('now')) "
+                "VALUES (%s, %s, %s, %s, NOW()) "
                 "ON CONFLICT(company_id, item_key) DO UPDATE SET "
                 "status=excluded.status, notes=excluded.notes, updated_at=excluded.updated_at",
                 (company_id, item_key, data.get("status", "Not Started"), data.get("notes", ""))
@@ -938,7 +838,7 @@ def _warm_cache() -> None:
     """Pre-load all KPI tables into st.session_state once per session.
 
     Called on every render but exits immediately after the first successful
-    warm. Subsequent calls are a single dict lookup — no Turso round trips.
+    warm. Subsequent calls are a single dict lookup — no DB round trips.
     To force a reload after a write, delete the _ws_* keys and set
     _cache_warmed = False before calling st.rerun().
     """
@@ -2756,7 +2656,7 @@ def render_benchmarking_tab(
                                         """INSERT INTO exit_comps
                                            (company_name, exit_type, revenue_at_exit_usd_m,
                                             ev_revenue_multiple, data_source, created_at, updated_at)
-                                           VALUES (?,?,?,?,?,?,?)""",
+                                           VALUES (%s,%s,%s,%s,%s,%s,%s)""",
                                         (new_name, new_exit_type,
                                          new_rev if new_rev > 0 else None,
                                          new_mult if new_mult > 0 else None,
@@ -2791,7 +2691,7 @@ def render_benchmarking_tab(
 def _existing_periods(company_id: int) -> set[str]:
     conn = _conn()
     rows = conn.execute(
-        "SELECT period_end_date FROM kpi_snapshots WHERE company_id = ?",
+        "SELECT period_end_date FROM kpi_snapshots WHERE company_id = %s",
         (company_id,),
     ).fetchall()
     conn.close()
@@ -2805,7 +2705,7 @@ def _upsert_kpi(company_id: int, data: dict) -> None:
     print(f"[_upsert_kpi] DB={DB_PATH} company_id={company_id} period={period}")
 
     existing = conn.execute(
-        "SELECT id FROM kpi_snapshots WHERE company_id=? AND period_end_date=?",
+        "SELECT id FROM kpi_snapshots WHERE company_id=%s AND period_end_date=%s",
         (company_id, period),
     ).fetchone()
 
@@ -2815,7 +2715,7 @@ def _upsert_kpi(company_id: int, data: dict) -> None:
             if k != "period_end_date" and v is not None
         }
         if update_cols:
-            set_clause = ", ".join(f"{k}=?" for k in update_cols)
+            set_clause = ", ".join(f"{k}=%s" for k in update_cols)
             conn.execute(
                 f"UPDATE kpi_snapshots SET {set_clause}, updated_at=? "
                 f"WHERE company_id=? AND period_end_date=?",
@@ -2825,7 +2725,7 @@ def _upsert_kpi(company_id: int, data: dict) -> None:
         row = {"company_id": company_id, "created_at": now, "updated_at": now,
                **{k: v for k, v in data.items() if v is not None}}
         cols_str    = ", ".join(row.keys())
-        placeholders = ", ".join("?" * len(row))
+        placeholders = ", ".join(["%s"] * len(row))
         conn.execute(
             f"INSERT INTO kpi_snapshots ({cols_str}) VALUES ({placeholders})",
             list(row.values()),
@@ -2844,7 +2744,7 @@ def _recompute_growth(company_id: int) -> None:
     conn = _conn()
     rows = conn.execute(
         """SELECT id, revenue_usd FROM kpi_snapshots
-           WHERE company_id = ? AND revenue_usd IS NOT NULL
+           WHERE company_id = %s AND revenue_usd IS NOT NULL
            ORDER BY period_end_date""",
         (company_id,),
     ).fetchall()
@@ -2855,7 +2755,7 @@ def _recompute_growth(company_id: int) -> None:
             prior = rows[i - 1][1]
             growth = round((rev - prior) / prior * 100, 4) if prior > 0 else None
         conn.execute(
-            "UPDATE kpi_snapshots SET revenue_growth_pct = ? WHERE id = ?",
+            "UPDATE kpi_snapshots SET revenue_growth_pct = %s WHERE id = %s",
             (growth, row_id),
         )
     conn.commit()
@@ -2867,7 +2767,7 @@ def _recompute_growth(company_id: int) -> None:
 def _exit_pathways_load(company_id: int) -> list[dict]:
     rows = _conn().execute(
         "SELECT id, pathway_name, likelihood, estimated_timeline, notes "
-        "FROM exit_pathways WHERE company_id=? ORDER BY id",
+        "FROM exit_pathways WHERE company_id=%s ORDER BY id",
         (company_id,),
     ).fetchall()
     return [{"id": r[0], "pathway_name": r[1], "likelihood": r[2],
@@ -2880,15 +2780,15 @@ def _exit_pathway_save(company_id: int, pid, name: str, likelihood: str,
     now  = datetime.utcnow().isoformat()
     if pid:
         conn.execute(
-            "UPDATE exit_pathways SET pathway_name=?,likelihood=?,"
-            "estimated_timeline=?,notes=?,updated_at=? WHERE id=?",
+            "UPDATE exit_pathways SET pathway_name=%s,likelihood=%s,"
+            "estimated_timeline=%s,notes=%s,updated_at=%s WHERE id=%s",
             (name, likelihood, timeline, notes, now, pid),
         )
     else:
         conn.execute(
             "INSERT INTO exit_pathways "
             "(company_id,pathway_name,likelihood,estimated_timeline,notes,created_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
             (company_id, name, likelihood, timeline, notes, now, now),
         )
     conn.commit()
@@ -2897,7 +2797,7 @@ def _exit_pathway_save(company_id: int, pid, name: str, likelihood: str,
 
 def _exit_pathway_delete(pid: int) -> None:
     conn = _conn()
-    conn.execute("DELETE FROM exit_pathways WHERE id=?", (pid,))
+    conn.execute("DELETE FROM exit_pathways WHERE id=%s", (pid,))
     conn.commit()
     conn.close()
 
@@ -2906,7 +2806,7 @@ def _buyer_tracking_load(company_id: int) -> pd.DataFrame:
     return pd.read_sql_query(
         "SELECT id, acquirer_name, acquirer_type, relationship_owner, "
         "last_contact_date, status FROM buyer_tracking "
-        "WHERE company_id=? ORDER BY sort_order, id",
+        "WHERE company_id=%s ORDER BY sort_order, id",
         _conn(), params=(company_id,),
     )
 
@@ -2914,7 +2814,7 @@ def _buyer_tracking_load(company_id: int) -> pd.DataFrame:
 def _buyer_tracking_replace(company_id: int, df: pd.DataFrame) -> None:
     conn = _conn()
     now  = datetime.utcnow().isoformat()
-    conn.execute("DELETE FROM buyer_tracking WHERE company_id=?", (company_id,))
+    conn.execute("DELETE FROM buyer_tracking WHERE company_id=%s", (company_id,))
     for i, row in df.iterrows():
         name = str(row.get("acquirer_name", "")).strip()
         if not name:
@@ -2923,7 +2823,7 @@ def _buyer_tracking_replace(company_id: int, df: pd.DataFrame) -> None:
             "INSERT INTO buyer_tracking "
             "(company_id,acquirer_name,acquirer_type,relationship_owner,"
             "last_contact_date,status,sort_order,created_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (company_id, name,
              str(row.get("acquirer_type", "Strategic")),
              str(row.get("relationship_owner", "") or ""),
@@ -2938,7 +2838,7 @@ def _buyer_tracking_replace(company_id: int, df: pd.DataFrame) -> None:
 def _quarterly_actions_load(company_id: int, quarter: str) -> dict:
     row = _conn().execute(
         "SELECT planned_actions, completed_actions, carry_forward "
-        "FROM quarterly_actions WHERE company_id=? AND quarter=?",
+        "FROM quarterly_actions WHERE company_id=%s AND quarter=%s",
         (company_id, quarter),
     ).fetchone()
     return {
@@ -2953,20 +2853,20 @@ def _quarterly_actions_save(company_id: int, quarter: str,
     conn = _conn()
     now  = datetime.utcnow().isoformat()
     exists = conn.execute(
-        "SELECT id FROM quarterly_actions WHERE company_id=? AND quarter=?",
+        "SELECT id FROM quarterly_actions WHERE company_id=%s AND quarter=%s",
         (company_id, quarter),
     ).fetchone()
     if exists:
         conn.execute(
-            "UPDATE quarterly_actions SET planned_actions=?,completed_actions=?,"
-            "carry_forward=?,updated_at=? WHERE company_id=? AND quarter=?",
+            "UPDATE quarterly_actions SET planned_actions=%s,completed_actions=%s,"
+            "carry_forward=%s,updated_at=%s WHERE company_id=%s AND quarter=%s",
             (planned, completed, carry, now, company_id, quarter),
         )
     else:
         conn.execute(
             "INSERT INTO quarterly_actions "
             "(company_id,quarter,planned_actions,completed_actions,carry_forward,created_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
             (company_id, quarter, planned, completed, carry, now, now),
         )
     conn.commit()
@@ -3322,11 +3222,11 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
         # ── Post-write verification ────────────────────────────────────────────
         _vconn = _conn()
         _vcount = _vconn.execute(
-            "SELECT COUNT(*) FROM kpi_snapshots WHERE company_id=?", (company_id,)
+            "SELECT COUNT(*) FROM kpi_snapshots WHERE company_id=%s", (company_id,)
         ).fetchone()[0]
         _vrows = _vconn.execute(
             "SELECT period_end_date, revenue_usd, updated_at FROM kpi_snapshots "
-            "WHERE company_id=? ORDER BY period_end_date DESC LIMIT 3",
+            "WHERE company_id=%s ORDER BY period_end_date DESC LIMIT 3",
             (company_id,),
         ).fetchall()
         _vconn.close()
