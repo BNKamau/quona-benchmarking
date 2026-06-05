@@ -1263,6 +1263,12 @@ def render_benchmarking_tab(
 
     company_name = info["name"]
     company_id   = int(info["id"])
+
+    # Force fresh comp data for Lulalend after is_clean_exit flags were corrected in DB
+    if company_name == "Lulalend":
+        load_comps_detail.clear()
+        load_comp_mapping.clear()
+
     comp_mapping = load_comp_mapping(company_name)
 
     if comp_mapping.empty:
@@ -4529,6 +4535,9 @@ def _render_vertofx_exit_tab() -> None:
 # ── Lulalend custom exit tab ─────────────────────────────────────────────────
 
 def _render_lulalend_exit_tab() -> None:
+    load_comps_detail.clear()
+    load_comp_mapping.clear()
+
     # ── Section 1: Exit Pathways (collapsed) ─────────────────────────────────
     AMBER     = "#FFC107"
     GREEN_DOT = "#D5FA94"
