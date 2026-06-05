@@ -7937,7 +7937,6 @@ if not st.user.is_logged_in:
         st.button(
             "Sign in with Google",
             on_click=st.login,
-            args=("google",),
             use_container_width=True,
             type="primary",
         )
