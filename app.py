@@ -7939,8 +7939,13 @@ if _auth_configured:
                           Portfolio Intelligence Platform</div>
             </div>
             """, unsafe_allow_html=True)
-            if st.button("Sign in with Google", use_container_width=True, type="primary"):
-                st.login("google")
+            st.button(
+                "Sign in with Google",
+                on_click=st.login,
+                args=("google",),
+                use_container_width=True,
+                type="primary",
+            )
             st.markdown(
                 "<div style='text-align:center;font-size:12px;color:#93A3A1;"
                 "margin-top:16px'>Restricted to @quona.com accounts</div>",
@@ -7951,8 +7956,7 @@ if _auth_configured:
     _user_email = getattr(st.user, "email", "") or ""
     if not _user_email.endswith("@quona.com"):
         st.error("Access restricted to @quona.com accounts.")
-        if st.button("Sign out"):
-            st.logout()
+        st.button("Sign out", on_click=st.logout)
         st.stop()
 
 # ── Persistent header ─────────────────────────────────────────────────────────
@@ -7970,8 +7974,7 @@ with _hdr_left:
 with _hdr_right:
     if _auth_configured and getattr(st.user, "is_logged_in", False):
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        if st.button("Sign out", key="header_logout"):
-            st.logout()
+        st.button("Sign out", key="header_logout", on_click=st.logout)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HOME PAGE
