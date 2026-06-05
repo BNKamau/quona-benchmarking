@@ -536,33 +536,29 @@ def load_ltm_revenue(db_version: str = "") -> pd.DataFrame:
         return st.session_state[_key]
     conn = _conn()
 
-    periods = pd.read_sql_query("""
-        WITH ranked AS (
+    # julianday() is SQLite-only; compute gap in Python after a plain window query.
+    _p2 = pd.read_sql_query("""
+        SELECT company_id AS id, period_end_date
+        FROM (
             SELECT company_id, period_end_date,
                    ROW_NUMBER() OVER (
                        PARTITION BY company_id ORDER BY period_end_date DESC
                    ) AS rn
             FROM kpi_snapshots
-        ),
-        gaps AS (
-            SELECT r1.company_id,
-                   CAST(julianday(r1.period_end_date)
-                        - julianday(r2.period_end_date) AS INTEGER) AS gap_days
-            FROM ranked r1
-            JOIN ranked r2
-                ON r1.company_id = r2.company_id AND r2.rn = 2
-            WHERE r1.rn = 1
-        )
-        SELECT company_id AS id,
-               gap_days,
-               CASE WHEN gap_days <= 45  THEN 'monthly'
-                    WHEN gap_days <= 135 THEN 'quarterly'
-                    ELSE                      'annual' END AS period_type,
-               CASE WHEN gap_days <= 45  THEN 12
-                    WHEN gap_days <= 135 THEN  4
-                    ELSE                       1 END AS needed
-        FROM gaps
+        ) sub
+        WHERE rn <= 2
     """, conn)
+    _p2["period_end_date"] = pd.to_datetime(_p2["period_end_date"])
+    _prows = []
+    for _cid, _grp in _p2.groupby("id"):
+        _dates = _grp.sort_values("period_end_date", ascending=False)["period_end_date"]
+        _gap   = int((_dates.iloc[0] - _dates.iloc[1]).days) if len(_dates) >= 2 else 30
+        _pt    = "monthly" if _gap <= 45 else ("quarterly" if _gap <= 135 else "annual")
+        _n     = 12 if _gap <= 45 else (4 if _gap <= 135 else 1)
+        _prows.append({"id": _cid, "gap_days": _gap, "period_type": _pt, "needed": _n})
+    periods = pd.DataFrame(_prows) if _prows else pd.DataFrame(
+        columns=["id", "gap_days", "period_type", "needed"])
+    del _p2, _prows
 
     rev = pd.read_sql_query("""
         SELECT company_id AS id, period_end_date, revenue_usd
