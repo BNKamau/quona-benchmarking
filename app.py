@@ -473,7 +473,7 @@ def load_companies(db_version: str = "") -> pd.DataFrame:
                COALESCE(
                    k.ebitda_margin_pct,
                    CASE WHEN k.revenue_usd > 0 AND k.ebitda_usd IS NOT NULL
-                        THEN ROUND(k.ebitda_usd * 100.0 / k.revenue_usd, 2)
+                        THEN ROUND(CAST(k.ebitda_usd * 100.0 / k.revenue_usd AS NUMERIC), 2)
                    END
                ) AS ebitda_margin_pct,
                k.period_end_date,
@@ -513,7 +513,7 @@ def load_revenue_growth(db_version: str = "") -> pd.DataFrame:
             r1.company_id AS id,
             CASE
                 WHEN r2.revenue_usd > 0
-                THEN ROUND((r1.revenue_usd - r2.revenue_usd) * 100.0 / r2.revenue_usd, 1)
+                THEN ROUND(CAST((r1.revenue_usd - r2.revenue_usd) * 100.0 / r2.revenue_usd AS NUMERIC), 1)
             END AS revenue_growth_pct
         FROM ranked r1
         LEFT JOIN ranked r2
