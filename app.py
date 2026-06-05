@@ -801,22 +801,24 @@ def load_kpis(company_id: int, db_version: str = "") -> pd.DataFrame:
 
 def _kpi_last_updated(company_id: int) -> str:
     """Read MAX(updated_at) directly from DB — not cached, always fresh."""
-    conn = _conn()
     try:
-        row = conn.execute(
-            "SELECT MAX(updated_at) FROM kpi_snapshots WHERE company_id=%s",
-            (company_id,),
-        ).fetchone()
-    finally:
-        conn.close()
-    ts = row[0] if row and row[0] else None
-    if not ts:
-        return "unknown"
-    try:
-        dt = datetime.fromisoformat(ts)
+        conn = _conn()
+        try:
+            row = conn.execute(
+                "SELECT MAX(updated_at) FROM kpi_snapshots WHERE company_id=%s",
+                (company_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        ts = row[0] if row and row[0] else None
+        if not ts:
+            return "unknown"
+        if hasattr(ts, "strftime"):
+            return ts.strftime("%d %b %Y %H:%M") + " UTC"
+        dt = datetime.fromisoformat(str(ts))
         return dt.strftime("%d %b %Y %H:%M") + " UTC"
     except Exception:
-        return ts
+        return "unknown"
 
 def _kpi_db_version(company_id: int) -> str:
     return ""  # session state warm cache handles invalidation
@@ -2515,7 +2517,7 @@ def render_benchmarking_tab(
             f"<td style='padding:8px 12px;font-weight:600;color:{BLACK};width:18%'>{name_html}</td>"
             f"<td style='padding:8px 12px;font-size:12px;color:{MUTED};width:14%'>"
             f"{(row.get('sub_sector') or '—').replace('_',' ').title()}</td>"
-            f"<td style='padding:8px 12px;font-size:12px;color:{MUTED};width:8%'>{row.get('geography','—')}</td>"
+            f"<td style='padding:8px 12px;font-size:12px;color:{MUTED};width:8%'>{row.get('geography') or '—'}</td>"
             f"<td style='padding:8px 12px;width:8%'>{et_html}</td>"
             f"<td style='padding:8px 12px;font-size:12px;color:{MUTED};width:5%'>{year_html}</td>"
             f"<td style='padding:8px 12px;font-weight:500;width:8%'>"
@@ -8044,9 +8046,9 @@ if st.session_state.page == "home":
         cid        = int(row["id"])
         name       = row["name"]
         sl         = sector_label(row.get("sector", ""))
-        country    = row.get("hq_country", "")
+        country    = row.get("hq_country") or ""
         ltm_val    = row.get("ltm_revenue")
-        ltm_lbl    = row.get("ltm_label", "")
+        ltm_lbl    = row.get("ltm_label") or ""
         pt         = row.get("period_type", "monthly")
         period_lbl = fmt_period_label(row.get("period_end_date"), pt)
         asof       = as_of(row.get("period_end_date"))
@@ -8238,7 +8240,8 @@ elif st.session_state.page == "detail":
     ltm_df  = load_ltm_revenue(db_version=_gver)
     ltm_row = ltm_df[ltm_df["id"] == company_id]
     ltm_val = float(ltm_row.iloc[0]["ltm_revenue"]) if not ltm_row.empty and not _is_null(ltm_row.iloc[0]["ltm_revenue"]) else None
-    ltm_lbl = ltm_row.iloc[0]["ltm_label"] if not ltm_row.empty else "—"
+    _raw_ltm_lbl = ltm_row.iloc[0].get("ltm_label") if not ltm_row.empty else None
+    ltm_lbl = str(_raw_ltm_lbl) if not _is_null(_raw_ltm_lbl) else "—"
 
     sl      = sector_label(info["sector"])
     founded = (
@@ -8262,7 +8265,7 @@ elif st.session_state.page == "detail":
           <div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <span style="background:{BLUE};border-radius:20px;padding:3px 12px;
                          font-size:12px;font-weight:500;color:{BLACK}">{sl}</span>
-            <span style="color:{MUTED};font-size:13px">{info['hq_country']} {founded}</span>
+            <span style="color:{MUTED};font-size:13px">{info.get('hq_country') or ''} {founded}</span>
           </div>
         </div>
       </div>
@@ -8279,10 +8282,14 @@ elif st.session_state.page == "detail":
     if _is_null(customers):
         customers = latest.get("active_clients_count")
 
-    date_range = (
-        f"{kpis['period_end_date'].min().strftime('%b %Y')} – "
-        f"{kpis['period_end_date'].max().strftime('%b %Y')}"
-    )
+    try:
+        _valid_dates = kpis["period_end_date"].dropna()
+        date_range = (
+            f"{_valid_dates.min().strftime('%b %Y')} – "
+            f"{_valid_dates.max().strftime('%b %Y')}"
+        ) if len(_valid_dates) >= 1 else "—"
+    except Exception:
+        date_range = "—"
 
     ltm_em_pct = (
         float(ltm_row.iloc[0]["ltm_ebitda_margin_pct"])
