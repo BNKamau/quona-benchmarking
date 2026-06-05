@@ -7918,16 +7918,9 @@ if "page" not in st.session_state:
 _warm_cache()
 
 # ── Authentication gate ───────────────────────────────────────────────────────
-_auth_configured = hasattr(st, "user") and hasattr(st.user, "is_logged_in")
-_is_logged_in    = _auth_configured and bool(st.user.is_logged_in)
-_user_email      = (getattr(st.user, "email", "") or "") if _is_logged_in else ""
-_is_authorized   = _is_logged_in and _user_email.endswith("@quona.com")
-
-if _auth_configured and not _is_logged_in:
+if not st.user.is_logged_in:
     st.markdown("""
-        <style>
-        #MainMenu, footer {visibility: hidden;}
-        </style>
+        <style>#MainMenu, footer {visibility: hidden;}</style>
     """, unsafe_allow_html=True)
     _, col, _ = st.columns([1, 2, 1])
     with col:
@@ -7941,13 +7934,7 @@ if _auth_configured and not _is_logged_in:
                       Portfolio Intelligence Platform</div>
         </div>
         """, unsafe_allow_html=True)
-        st.button(
-            "Sign in with Google",
-            on_click=st.login,
-            args=("google",),
-            use_container_width=True,
-            type="primary",
-        )
+        st.button("Sign in with Google", on_click=st.login, use_container_width=True, type="primary")
         st.markdown(
             "<div style='text-align:center;font-size:12px;color:#93A3A1;"
             "margin-top:16px'>Restricted to @quona.com accounts</div>",
@@ -7955,8 +7942,8 @@ if _auth_configured and not _is_logged_in:
         )
     st.stop()
 
-if _auth_configured and _is_logged_in and not _is_authorized:
-    st.error(f"Access restricted to @quona.com accounts. You signed in as: {_user_email}")
+if not st.user.email.endswith("@quona.com"):
+    st.error(f"Access restricted to @quona.com accounts. Signed in as: {st.user.email}")
     st.button("Sign out", on_click=st.logout)
     st.stop()
 
@@ -7973,9 +7960,9 @@ with _hdr_left:
     </div>
     """, unsafe_allow_html=True)
 with _hdr_right:
-    if _auth_configured and getattr(st.user, "is_logged_in", False):
+    if st.user.is_logged_in:
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-        st.button("Sign out", key="header_logout", on_click=st.logout)
+        st.button("Sign out", on_click=st.logout, key="header_logout")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HOME PAGE
