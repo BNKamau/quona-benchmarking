@@ -2570,10 +2570,6 @@ def render_benchmarking_tab(
             f"{co_name}</a>"
             if url else co_name
         )
-        # Add Zettle note
-        if co_name == "Zettle":
-            name_html += f"<div style='font-size:10px;color:{MUTED};font-style:italic'>Same deal as iZettle</div>"
-
         exit_type_raw = str(row.get("exit_type") or "").strip()
         et_key        = exit_type_raw.lower()
         if not is_clean:
@@ -2627,7 +2623,8 @@ def render_benchmarking_tab(
         f"<div style='font-size:11px;color:{MUTED};font-style:italic;margin-bottom:20px'>"
         f"Median calculations exclude SumUp (pre-exit funding mark, 45.2x) and CloudWalk "
         f"(pre-exit, no EV/Rev) as these are not completed exits. "
-        f"Zettle is the post-rebrand entity from the same iZettle–PayPal transaction."
+        f"iKhokha and DPO Group margins not publicly disclosed and excluded from margin medians. "
+        f"Fawry gross margin (44.0%) is a conservative estimate based on FY2021 trajectory."
         f"</div>",
         unsafe_allow_html=True,
     )
