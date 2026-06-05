@@ -1287,7 +1287,7 @@ def render_benchmarking_tab(
             _KH_GM_MED    = 26.0   # Payfare gross margin %
             _KH_EM_MED    = 15.0   # Payfare EBITDA margin %
             _KH_REV_SCALE = 235.0  # Payfare / DailyPay revenue at exit (USD M)
-            _KH_N_COMPS   = 4      # Payfare, DailyPay, MNT-Halan, Wagestream
+            _KH_N_COMPS   = 3      # Payfare, DailyPay, Wagestream
 
             st.markdown(
                 f"<div style='background:{WARN_BG};border:1px solid {WARN};border-radius:8px;"
@@ -1662,35 +1662,45 @@ def render_benchmarking_tab(
                 f"color:{MUTED};font-weight:600;margin-bottom:12px'>Comp Set — EWA and Digital Workforce Banking</div>",
                 unsafe_allow_html=True,
             )
-            _ref_comps = [
-                ("Payfare",    "#1565C0", "Acquired by Fiserv", "Dec 2024", "$147M",        "~0.6x rev", "Pure-play EWA + gig banking. 90% premium to last share price. Only listed EWA pure-play."),
-                ("DailyPay",   "#E65100", "Private",            "—",        "$1.75B (2024)", "~7x rev",   "Employer-paid B2B EWA. 6M employees. Chime offered $2B in 2022; IPO eyeing $3–4B."),
-                ("MNT-Halan",  "#6A1B9A", "Private Unicorn",    "—",        "$1B+ (2023)",   "~3x rev",   "Closest Egypt comp. $12B+ in loans disbursed. 7M users. Digital bank + lending."),
-                ("Wagestream", MUTED,     "Investor (Stake)",   "—",        "~$300M+ est.",  "—",         "Already holds Khazna stake. Global EWA portfolio (Refyne, GajiGesa). Most important signal."),
+            _KH_COMPS = [
+                ("Payfare",    "EWA / Gig Banking",         "Acquired by Fiserv", "Dec 2024", "$147M",         "~0.6x rev", "Pure-play EWA + gig banking. 90% premium to last share price. Only listed EWA pure-play."),
+                ("DailyPay",   "Employer-paid B2B EWA",     "Private (Pre-IPO)",  "—",        "$1.75B (2024)", "~7x rev",   "6M employees. Chime offered $2B in 2022; IPO eyeing $3–4B."),
+                ("Wagestream", "EWA / Workforce Finance",   "Investor (Stake)",   "—",        "~$300M+ est.",  "—",         "Already holds Khazna stake. Global EWA portfolio (Refyne, GajiGesa). Most important signal."),
             ]
-            _ref_cols = st.columns(2)
-            for _i, (_co, _col, _cst, _dt, _vl, _mu, _nt) in enumerate(_ref_comps):
-                with _ref_cols[_i % 2]:
-                    st.markdown(
-                        f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:8px;"
-                        f"padding:14px 16px;margin-bottom:10px'>"
-                        f"<div style='display:flex;align-items:center;gap:8px;margin-bottom:8px'>"
-                        f"<span style='font-size:14px;font-weight:700;color:{BLACK}'>{_co}</span>"
-                        f"<span style='font-size:11px;font-weight:600;color:{_col};background:{BG};"
-                        f"border-radius:4px;padding:2px 7px'>{_cst}</span>"
-                        f"</div>"
-                        f"<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:8px'>"
-                        f"<div><div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.5px'>Date</div>"
-                        f"<div style='font-size:12px;font-weight:600;color:{BLACK}'>{_dt}</div></div>"
-                        f"<div><div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.5px'>Valuation</div>"
-                        f"<div style='font-size:12px;font-weight:600;color:{BLACK}'>{_vl}</div></div>"
-                        f"<div><div style='font-size:9px;color:{MUTED};text-transform:uppercase;letter-spacing:.5px'>Multiple</div>"
-                        f"<div style='font-size:12px;font-weight:600;color:{_col}'>{_mu}</div></div>"
-                        f"</div>"
-                        f"<div style='font-size:11px;color:{MUTED};line-height:1.5'>{_nt}</div>"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
+            _kh_hdr_style = (
+                "font-size:10px;font-weight:700;color:#93A3A1;text-transform:uppercase;"
+                "letter-spacing:.5px;padding:8px 12px"
+            )
+            _kh_cols_w = "1fr 1.2fr 1fr 0.7fr 1fr 0.7fr 2fr"
+            _kh_hdrs   = ["Company", "Type", "Status", "Date", "Valuation", "Multiple", "Notes"]
+            _kh_header_html = (
+                f"<div style='display:grid;grid-template-columns:{_kh_cols_w};"
+                f"border-bottom:2px solid {BORDER};margin-bottom:4px'>"
+                + "".join(f"<div style='{_kh_hdr_style}'>{h}</div>" for h in _kh_hdrs)
+                + "</div>"
+            )
+            _kh_rows_html = ""
+            for _i, (_co, _typ, _cst, _dt, _vl, _mu, _nt) in enumerate(_KH_COMPS):
+                _bg   = WHITE if _i % 2 == 0 else "#F9FAF7"
+                _cell = f"font-size:12px;color:{MUTED};padding:8px 12px;line-height:1.5"
+                _kh_rows_html += (
+                    f"<div style='display:grid;grid-template-columns:{_kh_cols_w};background:{_bg};border-radius:4px'>"
+                    f"<div style='font-size:13px;font-weight:700;color:{BLACK};padding:8px 12px'>{_co}</div>"
+                    f"<div style='{_cell}'>{_typ}</div>"
+                    f"<div style='font-size:12px;color:{BLACK};font-weight:600;padding:8px 12px'>{_cst}</div>"
+                    f"<div style='{_cell}'>{_dt}</div>"
+                    f"<div style='font-size:13px;color:{BLACK};font-weight:600;padding:8px 12px'>{_vl}</div>"
+                    f"<div style='font-size:12px;color:{GREEN};font-weight:600;padding:8px 12px'>{_mu}</div>"
+                    f"<div style='{_cell}'>{_nt}</div>"
+                    f"</div>"
+                )
+            st.markdown(
+                f"<div style='background:{WHITE};border:1px solid {BORDER};border-radius:10px;"
+                f"padding:16px 4px;overflow:hidden'>"
+                + _kh_header_html + _kh_rows_html
+                + "</div>",
+                unsafe_allow_html=True,
+            )
             st.markdown(
                 f"<div style='font-size:11px;color:{MUTED};margin-top:4px;line-height:1.6'>"
                 f"Gross margin and EBITDA margin benchmarks based on Payfare (the only publicly listed pure-play EWA comp). "
