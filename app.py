@@ -2500,8 +2500,21 @@ def render_benchmarking_tab(
             f"{co_name}</a>"
             if url else co_name
         )
-        exit_type_raw = str(row.get("exit_type") or "").strip()
-        et_key        = exit_type_raw.lower()
+        EXIT_TYPE_LABELS = {
+            "acquisition":        "Acquisition",
+            "strategic_ma":       "Strategic M&A",
+            "strategic m&a":      "Strategic M&A",
+            "ipo":                "IPO",
+            "financial_sponsor":  "Financial Sponsor",
+            "financial sponsor":  "Financial Sponsor",
+            "secondary":          "Secondary",
+            "private":            "Private",
+            "collapsed":          "Collapsed",
+            "administration":     "Administration",
+        }
+        exit_type_raw     = str(row.get("exit_type") or "").strip()
+        et_key            = exit_type_raw.lower()
+        exit_type_display = EXIT_TYPE_LABELS.get(et_key, exit_type_raw.replace("_", " ").title())
         if not is_clean:
             et_html = (
                 f"<span style='font-size:11px;color:{MUTED};font-style:italic'>"
@@ -2511,7 +2524,7 @@ def render_benchmarking_tab(
             et_bg, et_fg = EXIT_TYPE_COLORS.get(et_key, ("#D4D5CE", "#2C2C2A"))
             et_html = (
                 f"<span style='background:{et_bg};color:{et_fg};border-radius:4px;"
-                f"padding:2px 7px;font-size:11px;font-weight:600'>{exit_type_raw}</span>"
+                f"padding:2px 7px;font-size:11px;font-weight:600'>{exit_type_display}</span>"
                 if exit_type_raw else "—"
             )
 
@@ -2549,15 +2562,37 @@ def render_benchmarking_tab(
         f"</table></div>",
         unsafe_allow_html=True,
     )
-    st.markdown(
-        f"<div style='font-size:11px;color:{MUTED};font-style:italic;margin-bottom:20px'>"
-        f"Median calculations exclude SumUp (pre-exit funding mark, 45.2x) and CloudWalk "
-        f"(pre-exit, no EV/Rev) as these are not completed exits. "
-        f"iKhokha and DPO Group margins not publicly disclosed and excluded from margin medians. "
-        f"Fawry gross margin (44.0%) is a conservative estimate based on FY2021 trajectory."
-        f"</div>",
-        unsafe_allow_html=True,
-    )
+    # Build dynamic footnote based on what's actually in this comp set
+    pre_exit_names  = [r["company_name"] for _, r in comps.iterrows() if not int(r.get("is_clean_exit", 1))]
+    no_margin_names = [r["company_name"] for _, r in comps.iterrows()
+                       if int(r.get("is_clean_exit", 1)) and
+                       _is_null(r.get("gross_margin_pct")) and _is_null(r.get("ebitda_margin_pct"))]
+    estimated_names = [r["company_name"] for _, r in comps.iterrows()
+                       if str(r.get("data_confidence", "")).lower() in ("low", "medium") and
+                       int(r.get("is_clean_exit", 1))]
+
+    footnote_parts = []
+    if pre_exit_names:
+        footnote_parts.append(
+            f"Median calculations exclude {', '.join(pre_exit_names)} "
+            f"({'pre-exit funding mark' if len(pre_exit_names) == 1 else 'pre-exit funding marks'}) "
+            f"as these are not completed exits."
+        )
+    if no_margin_names:
+        footnote_parts.append(
+            f"{', '.join(no_margin_names)} margins not publicly disclosed and excluded from margin medians."
+        )
+    if estimated_names:
+        footnote_parts.append(
+            f"{', '.join(estimated_names)} figures are estimates based on available public data."
+        )
+
+    if footnote_parts:
+        st.markdown(
+            f"<div style='font-size:11px;color:{MUTED};font-style:italic;margin-bottom:20px'>"
+            f"{' '.join(footnote_parts)}</div>",
+            unsafe_allow_html=True,
+        )
 
     # ── Yoco: Affinity deal intelligence scan ────────────────────────────────────
     if company_name == "Yoco":
