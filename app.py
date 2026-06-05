@@ -7917,14 +7917,61 @@ if "page" not in st.session_state:
 
 _warm_cache()
 
+# ── Authentication gate ───────────────────────────────────────────────────────
+_auth_configured = hasattr(st, "user") and hasattr(st.user, "is_logged_in")
+
+if _auth_configured:
+    if not st.user.is_logged_in:
+        st.markdown("""
+            <style>
+            #MainMenu, footer {visibility: hidden;}
+            </style>
+        """, unsafe_allow_html=True)
+        _, col, _ = st.columns([1, 2, 1])
+        with col:
+            st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
+            st.markdown("""
+            <div style='background:#2C2C2A;border-radius:16px;padding:48px;
+                        text-align:center;margin-bottom:32px'>
+              <div style='font-size:32px;font-weight:800;color:#D5FA94;
+                          letter-spacing:-0.5px;margin-bottom:8px'>Quona Capital</div>
+              <div style='font-size:15px;color:rgba(255,255,255,0.55)'>
+                          Portfolio Intelligence Platform</div>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("Sign in with Google", use_container_width=True, type="primary"):
+                st.login("google")
+            st.markdown(
+                "<div style='text-align:center;font-size:12px;color:#93A3A1;"
+                "margin-top:16px'>Restricted to @quona.com accounts</div>",
+                unsafe_allow_html=True,
+            )
+        st.stop()
+
+    _user_email = getattr(st.user, "email", "") or ""
+    if not _user_email.endswith("@quona.com"):
+        st.error("Access restricted to @quona.com accounts.")
+        if st.button("Sign out"):
+            st.logout()
+        st.stop()
+
 # ── Persistent header ─────────────────────────────────────────────────────────
-st.markdown(f"""
-<div style="background:{BLACK};border-radius:12px;padding:14px 28px;
-            margin-bottom:20px;display:flex;align-items:baseline;gap:12px;">
-  <span style="font-size:22px;font-weight:800;color:{GREEN};letter-spacing:-0.5px;">Quona Capital</span>
-  <span style="font-size:13px;color:rgba(255,255,255,0.55);">Portfolio Intelligence</span>
-</div>
-""", unsafe_allow_html=True)
+_hdr_left, _hdr_right = st.columns([9, 1])
+with _hdr_left:
+    st.markdown(f"""
+    <div style="background:{BLACK};border-radius:12px;padding:14px 28px;
+                margin-bottom:20px;display:flex;align-items:baseline;gap:12px;">
+      <span style="font-size:22px;font-weight:800;color:{GREEN};
+                   letter-spacing:-0.5px;">Quona Capital</span>
+      <span style="font-size:13px;color:rgba(255,255,255,0.55);">
+                   Portfolio Intelligence</span>
+    </div>
+    """, unsafe_allow_html=True)
+with _hdr_right:
+    if _auth_configured and getattr(st.user, "is_logged_in", False):
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        if st.button("Sign out", key="header_logout"):
+            st.logout()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HOME PAGE
