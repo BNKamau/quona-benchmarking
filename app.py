@@ -785,27 +785,42 @@ def load_kpis(company_id: int, db_version: str = "") -> pd.DataFrame:
 
 def _kpi_last_updated(company_id: int) -> str:
     """Read MAX(updated_at) directly from DB — not cached, always fresh."""
+    conn = _conn()
     try:
-        conn = _conn()
-        try:
-            row = conn.execute(
-                "SELECT MAX(updated_at) FROM kpi_snapshots WHERE company_id=%s",
-                (company_id,),
-            ).fetchone()
-        finally:
-            conn.close()
-        ts = row[0] if row and row[0] else None
-        if not ts:
-            return "unknown"
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT MAX(updated_at) FROM kpi_snapshots WHERE company_id=%s",
+            (company_id,),
+        )
+        row = cur.fetchone()
+        cur.close()
+    finally:
+        conn.close()
+    ts = row[0] if row and row[0] else None
+    if not ts:
+        return "unknown"
+    try:
         if hasattr(ts, "strftime"):
             return ts.strftime("%d %b %Y %H:%M") + " UTC"
         dt = datetime.fromisoformat(str(ts))
         return dt.strftime("%d %b %Y %H:%M") + " UTC"
     except Exception:
-        return "unknown"
+        return str(ts)
 
 def _kpi_db_version(company_id: int) -> str:
-    return ""  # session state warm cache handles invalidation
+    """Raw MAX(updated_at) for one company — used as a @st.cache_data key."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT MAX(updated_at) FROM kpi_snapshots WHERE company_id=%s",
+            (company_id,),
+        )
+        row = cur.fetchone()
+        cur.close()
+    finally:
+        conn.close()
+    return str(row[0]) if (row and row[0]) else ""
 
 def _db_global_version() -> str:
     return ""  # session state warm cache handles invalidation
@@ -816,10 +831,13 @@ def _ipo_readiness_load(company_id: int) -> dict:
     """Return {item_key: {status, notes, updated_at}} from ipo_readiness table."""
     conn = _conn()
     try:
-        rows = conn.execute(
+        cur = conn.cursor()
+        cur.execute(
             "SELECT item_key, status, notes, updated_at FROM ipo_readiness WHERE company_id=%s",
             (company_id,)
-        ).fetchall()
+        )
+        rows = cur.fetchall()
+        cur.close()
     finally:
         conn.close()
     return {r[0]: {"status": r[1], "notes": r[2] or "", "updated_at": r[3] or ""} for r in rows}
@@ -829,14 +847,16 @@ def _ipo_readiness_save(company_id: int, updates: dict) -> None:
     """Upsert {item_key: {status, notes}} rows into ipo_readiness."""
     conn = _conn()
     try:
+        cur = conn.cursor()
         for item_key, data in updates.items():
-            conn.execute(
+            cur.execute(
                 "INSERT INTO ipo_readiness (company_id, item_key, status, notes, updated_at) "
                 "VALUES (%s, %s, %s, %s, NOW()) "
                 "ON CONFLICT(company_id, item_key) DO UPDATE SET "
                 "status=excluded.status, notes=excluded.notes, updated_at=excluded.updated_at",
                 (company_id, item_key, data.get("status", "Not Started"), data.get("notes", ""))
             )
+        cur.close()
         conn.commit()
     finally:
         conn.close()
@@ -2700,11 +2720,16 @@ def render_benchmarking_tab(
 
 def _existing_periods(company_id: int) -> set[str]:
     conn = _conn()
-    rows = conn.execute(
-        "SELECT period_end_date FROM kpi_snapshots WHERE company_id = %s",
-        (company_id,),
-    ).fetchall()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT period_end_date FROM kpi_snapshots WHERE company_id = %s",
+            (company_id,),
+        )
+        rows = cur.fetchall()
+        cur.close()
+    finally:
+        conn.close()
     return {r[0] for r in rows}
 
 
@@ -2713,36 +2738,39 @@ def _upsert_kpi(company_id: int, data: dict) -> None:
     now    = datetime.utcnow().isoformat()
     period = data["period_end_date"]
     print(f"[_upsert_kpi] DB={DB_PATH} company_id={company_id} period={period}")
-
-    existing = conn.execute(
-        "SELECT id FROM kpi_snapshots WHERE company_id=%s AND period_end_date=%s",
-        (company_id, period),
-    ).fetchone()
-
-    if existing:
-        update_cols = {
-            k: v for k, v in data.items()
-            if k != "period_end_date" and v is not None
-        }
-        if update_cols:
-            set_clause = ", ".join(f"{k}=%s" for k in update_cols)
-            conn.execute(
-                f"UPDATE kpi_snapshots SET {set_clause}, updated_at=? "
-                f"WHERE company_id=? AND period_end_date=?",
-                [*update_cols.values(), now, company_id, period],
-            )
-    else:
-        row = {"company_id": company_id, "created_at": now, "updated_at": now,
-               **{k: v for k, v in data.items() if v is not None}}
-        cols_str    = ", ".join(row.keys())
-        placeholders = ", ".join(["%s"] * len(row))
-        conn.execute(
-            f"INSERT INTO kpi_snapshots ({cols_str}) VALUES ({placeholders})",
-            list(row.values()),
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id FROM kpi_snapshots WHERE company_id=%s AND period_end_date=%s",
+            (company_id, period),
         )
+        existing = cur.fetchone()
 
-    conn.commit()
-    conn.close()
+        if existing:
+            update_cols = {
+                k: v for k, v in data.items()
+                if k != "period_end_date" and v is not None
+            }
+            if update_cols:
+                set_clause = ", ".join(f"{k}=%s" for k in update_cols)
+                cur.execute(
+                    f"UPDATE kpi_snapshots SET {set_clause}, updated_at=%s "
+                    f"WHERE company_id=%s AND period_end_date=%s",
+                    [*update_cols.values(), now, company_id, period],
+                )
+        else:
+            row = {"company_id": company_id, "created_at": now, "updated_at": now,
+                   **{k: v for k, v in data.items() if v is not None}}
+            cols_str     = ", ".join(row.keys())
+            placeholders = ", ".join(["%s"] * len(row))
+            cur.execute(
+                f"INSERT INTO kpi_snapshots ({cols_str}) VALUES ({placeholders})",
+                list(row.values()),
+            )
+        cur.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _recompute_growth(company_id: int) -> None:
@@ -2752,34 +2780,46 @@ def _recompute_growth(company_id: int) -> None:
     parser leaves as None) gets its growth filled from the prior DB period.
     """
     conn = _conn()
-    rows = conn.execute(
-        """SELECT id, revenue_usd FROM kpi_snapshots
-           WHERE company_id = %s AND revenue_usd IS NOT NULL
-           ORDER BY period_end_date""",
-        (company_id,),
-    ).fetchall()
-    for i, (row_id, rev) in enumerate(rows):
-        if i == 0 or rows[i - 1][1] is None:
-            growth = None
-        else:
-            prior = rows[i - 1][1]
-            growth = round((rev - prior) / prior * 100, 4) if prior > 0 else None
-        conn.execute(
-            "UPDATE kpi_snapshots SET revenue_growth_pct = %s WHERE id = %s",
-            (growth, row_id),
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT id, revenue_usd FROM kpi_snapshots
+               WHERE company_id = %s AND revenue_usd IS NOT NULL
+               ORDER BY period_end_date""",
+            (company_id,),
         )
-    conn.commit()
-    conn.close()
+        rows = cur.fetchall()
+        for i, (row_id, rev) in enumerate(rows):
+            if i == 0 or rows[i - 1][1] is None:
+                growth = None
+            else:
+                prior = rows[i - 1][1]
+                growth = round((rev - prior) / prior * 100, 4) if prior > 0 else None
+            cur.execute(
+                "UPDATE kpi_snapshots SET revenue_growth_pct = %s WHERE id = %s",
+                (growth, row_id),
+            )
+        cur.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ── Exit tracking DB helpers ──────────────────────────────────────────────────
 
 def _exit_pathways_load(company_id: int) -> list[dict]:
-    rows = _conn().execute(
-        "SELECT id, pathway_name, likelihood, estimated_timeline, notes "
-        "FROM exit_pathways WHERE company_id=%s ORDER BY id",
-        (company_id,),
-    ).fetchall()
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, pathway_name, likelihood, estimated_timeline, notes "
+            "FROM exit_pathways WHERE company_id=%s ORDER BY id",
+            (company_id,),
+        )
+        rows = cur.fetchall()
+        cur.close()
+    finally:
+        conn.close()
     return [{"id": r[0], "pathway_name": r[1], "likelihood": r[2],
              "estimated_timeline": r[3], "notes": r[4]} for r in rows]
 
@@ -2788,28 +2828,36 @@ def _exit_pathway_save(company_id: int, pid, name: str, likelihood: str,
                        timeline: str, notes: str) -> None:
     conn = _conn()
     now  = datetime.utcnow().isoformat()
-    if pid:
-        conn.execute(
-            "UPDATE exit_pathways SET pathway_name=%s,likelihood=%s,"
-            "estimated_timeline=%s,notes=%s,updated_at=%s WHERE id=%s",
-            (name, likelihood, timeline, notes, now, pid),
-        )
-    else:
-        conn.execute(
-            "INSERT INTO exit_pathways "
-            "(company_id,pathway_name,likelihood,estimated_timeline,notes,created_at,updated_at) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
-            (company_id, name, likelihood, timeline, notes, now, now),
-        )
-    conn.commit()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        if pid:
+            cur.execute(
+                "UPDATE exit_pathways SET pathway_name=%s,likelihood=%s,"
+                "estimated_timeline=%s,notes=%s,updated_at=%s WHERE id=%s",
+                (name, likelihood, timeline, notes, now, pid),
+            )
+        else:
+            cur.execute(
+                "INSERT INTO exit_pathways "
+                "(company_id,pathway_name,likelihood,estimated_timeline,notes,created_at,updated_at) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (company_id, name, likelihood, timeline, notes, now, now),
+            )
+        cur.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _exit_pathway_delete(pid: int) -> None:
     conn = _conn()
-    conn.execute("DELETE FROM exit_pathways WHERE id=%s", (pid,))
-    conn.commit()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM exit_pathways WHERE id=%s", (pid,))
+        cur.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _buyer_tracking_load(company_id: int) -> pd.DataFrame:
@@ -2824,33 +2872,44 @@ def _buyer_tracking_load(company_id: int) -> pd.DataFrame:
 def _buyer_tracking_replace(company_id: int, df: pd.DataFrame) -> None:
     conn = _conn()
     now  = datetime.utcnow().isoformat()
-    conn.execute("DELETE FROM buyer_tracking WHERE company_id=%s", (company_id,))
-    for i, row in df.iterrows():
-        name = str(row.get("acquirer_name", "")).strip()
-        if not name:
-            continue
-        conn.execute(
-            "INSERT INTO buyer_tracking "
-            "(company_id,acquirer_name,acquirer_type,relationship_owner,"
-            "last_contact_date,status,sort_order,created_at,updated_at) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (company_id, name,
-             str(row.get("acquirer_type", "Strategic")),
-             str(row.get("relationship_owner", "") or ""),
-             str(row.get("last_contact_date", "") or ""),
-             str(row.get("status", "Not Started")),
-             i, now, now),
-        )
-    conn.commit()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM buyer_tracking WHERE company_id=%s", (company_id,))
+        for i, row in df.iterrows():
+            name = str(row.get("acquirer_name", "")).strip()
+            if not name:
+                continue
+            cur.execute(
+                "INSERT INTO buyer_tracking "
+                "(company_id,acquirer_name,acquirer_type,relationship_owner,"
+                "last_contact_date,status,sort_order,created_at,updated_at) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (company_id, name,
+                 str(row.get("acquirer_type", "Strategic")),
+                 str(row.get("relationship_owner", "") or ""),
+                 str(row.get("last_contact_date", "") or ""),
+                 str(row.get("status", "Not Started")),
+                 i, now, now),
+            )
+        cur.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _quarterly_actions_load(company_id: int, quarter: str) -> dict:
-    row = _conn().execute(
-        "SELECT planned_actions, completed_actions, carry_forward "
-        "FROM quarterly_actions WHERE company_id=%s AND quarter=%s",
-        (company_id, quarter),
-    ).fetchone()
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT planned_actions, completed_actions, carry_forward "
+            "FROM quarterly_actions WHERE company_id=%s AND quarter=%s",
+            (company_id, quarter),
+        )
+        row = cur.fetchone()
+        cur.close()
+    finally:
+        conn.close()
     return {
         "planned_actions":   (row[0] or "") if row else "",
         "completed_actions": (row[1] or "") if row else "",
@@ -2862,25 +2921,30 @@ def _quarterly_actions_save(company_id: int, quarter: str,
                              planned: str, completed: str, carry: str) -> None:
     conn = _conn()
     now  = datetime.utcnow().isoformat()
-    exists = conn.execute(
-        "SELECT id FROM quarterly_actions WHERE company_id=%s AND quarter=%s",
-        (company_id, quarter),
-    ).fetchone()
-    if exists:
-        conn.execute(
-            "UPDATE quarterly_actions SET planned_actions=%s,completed_actions=%s,"
-            "carry_forward=%s,updated_at=%s WHERE company_id=%s AND quarter=%s",
-            (planned, completed, carry, now, company_id, quarter),
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id FROM quarterly_actions WHERE company_id=%s AND quarter=%s",
+            (company_id, quarter),
         )
-    else:
-        conn.execute(
-            "INSERT INTO quarterly_actions "
-            "(company_id,quarter,planned_actions,completed_actions,carry_forward,created_at,updated_at) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
-            (company_id, quarter, planned, completed, carry, now, now),
-        )
-    conn.commit()
-    conn.close()
+        exists = cur.fetchone()
+        if exists:
+            cur.execute(
+                "UPDATE quarterly_actions SET planned_actions=%s,completed_actions=%s,"
+                "carry_forward=%s,updated_at=%s WHERE company_id=%s AND quarter=%s",
+                (planned, completed, carry, now, company_id, quarter),
+            )
+        else:
+            cur.execute(
+                "INSERT INTO quarterly_actions "
+                "(company_id,quarter,planned_actions,completed_actions,carry_forward,created_at,updated_at) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (company_id, quarter, planned, completed, carry, now, now),
+            )
+        cur.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ── Exit tab suggestion helpers ───────────────────────────────────────────────
@@ -3231,15 +3295,21 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
 
         # ── Post-write verification ────────────────────────────────────────────
         _vconn = _conn()
-        _vcount = _vconn.execute(
-            "SELECT COUNT(*) FROM kpi_snapshots WHERE company_id=%s", (company_id,)
-        ).fetchone()[0]
-        _vrows = _vconn.execute(
-            "SELECT period_end_date, revenue_usd, updated_at FROM kpi_snapshots "
-            "WHERE company_id=%s ORDER BY period_end_date DESC LIMIT 3",
-            (company_id,),
-        ).fetchall()
-        _vconn.close()
+        try:
+            _vcur = _vconn.cursor()
+            _vcur.execute(
+                "SELECT COUNT(*) FROM kpi_snapshots WHERE company_id=%s", (company_id,)
+            )
+            _vcount = _vcur.fetchone()[0]
+            _vcur.execute(
+                "SELECT period_end_date, revenue_usd, updated_at FROM kpi_snapshots "
+                "WHERE company_id=%s ORDER BY period_end_date DESC LIMIT 3",
+                (company_id,),
+            )
+            _vrows = _vcur.fetchall()
+            _vcur.close()
+        finally:
+            _vconn.close()
         _write_ts = _vrows[0][2] if _vrows else "unknown"
         print(f"[upload verify] DB={DB_PATH} company_id={company_id} "
               f"total_rows={_vcount} latest_3={_vrows}")
