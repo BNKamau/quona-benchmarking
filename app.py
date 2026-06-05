@@ -7972,11 +7972,13 @@ def _render_login() -> None:
                       Portfolio Intelligence Platform</div>
         </div>
         """, unsafe_allow_html=True)
-        st.write(f"DEBUG: APP_PASSWORD = '{st.secrets.get('APP_PASSWORD', 'NOT_FOUND')}'")
         with st.form("login"):
             password = st.text_input("Access code", type="password", placeholder="Enter access code")
             submit   = st.form_submit_button("Enter", use_container_width=True)
-        _stored = st.secrets.get("APP_PASSWORD", "NOT_FOUND")
+        _stored = (
+            st.secrets.get("APP_PASSWORD") or
+            st.secrets.get("auth", {}).get("APP_PASSWORD", "")
+        )
         if submit:
             if password == _stored:
                 st.session_state["_auth"] = True
