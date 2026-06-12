@@ -379,6 +379,20 @@ def _init_db() -> None:
         )
     """)
 
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS exit_documents (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id   INTEGER NOT NULL,
+            doc_name     TEXT    NOT NULL,
+            doc_type     TEXT    NOT NULL DEFAULT 'exit_planning',
+            file_data    BLOB    NOT NULL,
+            file_size    INTEGER,
+            uploaded_by  TEXT    DEFAULT '',
+            uploaded_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+            notes        TEXT    DEFAULT ''
+        )
+    """)
+
     conn.commit()
 
     # Idempotently add columns that were introduced after the initial schema
@@ -425,6 +439,64 @@ def _init_db() -> None:
 # Skip on Supabase — tables already exist; _init_db uses SQLite-only DDL syntax.
 if not st.secrets.get("SUPABASE_DB_URL", ""):
     _init_db()
+
+
+# ── Exit document helpers ──────────────────────────────────────────────────────
+
+def save_exit_document(company_id: int, doc_name: str, file_bytes: bytes,
+                       doc_type: str = "exit_planning", notes: str = "") -> int:
+    conn = _conn()
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM exit_documents WHERE company_id = %s AND doc_name = %s",
+        (company_id, doc_name),
+    )
+    is_pg = bool(st.secrets.get("SUPABASE_DB_URL", ""))
+    file_param = psycopg2.Binary(file_bytes) if is_pg else file_bytes
+    cur.execute(
+        """INSERT INTO exit_documents
+               (company_id, doc_name, doc_type, file_data, file_size, uploaded_at, notes)
+           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+        (company_id, doc_name, doc_type, file_param, len(file_bytes),
+         datetime.utcnow().isoformat(), notes),
+    )
+    conn.commit()
+    conn.close()
+    return 0
+
+
+def list_exit_documents(company_id: int) -> list:
+    conn = _conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id, doc_name, doc_type, file_size, uploaded_at, notes
+           FROM exit_documents WHERE company_id = %s ORDER BY uploaded_at DESC""",
+        (company_id,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return [
+        {"id": r[0], "doc_name": r[1], "doc_type": r[2],
+         "file_size": r[3], "uploaded_at": r[4], "notes": r[5]}
+        for r in rows
+    ]
+
+
+def get_exit_document(doc_id: int):
+    conn = _conn()
+    cur = conn.cursor()
+    cur.execute("SELECT file_data FROM exit_documents WHERE id = %s", (doc_id,))
+    row = cur.fetchone()
+    conn.close()
+    return bytes(row[0]) if row else None
+
+
+def delete_exit_document(doc_id: int) -> None:
+    conn = _conn()
+    conn.execute("DELETE FROM exit_documents WHERE id = %s", (doc_id,))
+    conn.commit()
+    conn.close()
+
 
 # ── Exit comps DB helpers ──────────────────────────────────────────────────────
 COMPS_DB = os.path.join(_HERE, "data", "quona_exit_comps.db")
@@ -3689,9 +3761,105 @@ def fetch_last_affinity_note_for_buyer(buyer_name: str, affinity_api_key: str) -
         return None
 
 
+# ── Shared: exit document upload / viewer section ────────────────────────────
+
+def _render_exit_deck_section(company_id: int, company_name: str) -> None:
+    """Render the exit document upload/view section at the bottom of any exit tab."""
+    st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='font-size:11px;font-weight:700;letter-spacing:.8px;"
+        f"text-transform:uppercase;color:{MUTED};margin-bottom:12px'>Exit Documents</div>",
+        unsafe_allow_html=True,
+    )
+
+    docs = list_exit_documents(company_id)
+    if docs:
+        for doc in docs:
+            size_kb = f"{doc['file_size'] // 1024:,} KB" if doc['file_size'] else "—"
+            date_str = doc['uploaded_at'][:10] if doc['uploaded_at'] else "—"
+            col_name, col_meta, col_dl, col_del = st.columns([3, 2, 1.2, 0.8])
+            with col_name:
+                st.markdown(
+                    f"<div style='font-size:13px;font-weight:600;color:#2C2C2A;padding-top:6px'>"
+                    f"📄 {doc['doc_name']}</div>"
+                    + (f"<div style='font-size:11px;color:{MUTED}'>{doc['notes']}</div>"
+                       if doc['notes'] else ""),
+                    unsafe_allow_html=True,
+                )
+            with col_meta:
+                st.markdown(
+                    f"<div style='font-size:12px;color:{MUTED};padding-top:6px'>{size_kb} · {date_str}</div>",
+                    unsafe_allow_html=True,
+                )
+            with col_dl:
+                raw = get_exit_document(doc['id'])
+                if raw:
+                    st.download_button(
+                        label="📥 View",
+                        data=raw,
+                        file_name=doc['doc_name'] if doc['doc_name'].endswith('.pdf') else doc['doc_name'] + '.pdf',
+                        mime="application/pdf",
+                        key=f"dl_exitdoc_{doc['id']}",
+                    )
+            with col_del:
+                if st.button("🗑", key=f"del_exitdoc_{doc['id']}", help="Delete this document"):
+                    delete_exit_document(doc['id'])
+                    st.rerun()
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+    else:
+        st.markdown(
+            f"<div style='font-size:13px;color:{MUTED};margin-bottom:16px'>"
+            "No documents uploaded yet.</div>",
+            unsafe_allow_html=True,
+        )
+
+    with st.expander("Upload exit document", expanded=len(docs) == 0):
+        st.markdown(
+            f"<div style='font-size:12px;color:{MUTED};margin-bottom:10px'>"
+            "Upload exit planning decks, banker materials, or process documents. "
+            "PDFs only. Stored in the platform database.</div>",
+            unsafe_allow_html=True,
+        )
+        uploaded_file = st.file_uploader(
+            "Select PDF",
+            type=["pdf"],
+            key=f"exit_doc_uploader_{company_id}",
+            label_visibility="collapsed",
+        )
+        label_input = st.text_input(
+            "Document label (optional — defaults to filename)",
+            key=f"exit_doc_label_{company_id}",
+            placeholder="e.g. Cowrywise Exit Planning v1 — June 2026",
+        )
+        notes_input = st.text_input(
+            "Notes (optional)",
+            key=f"exit_doc_notes_{company_id}",
+            placeholder="e.g. Prepared by Quona for board meeting",
+        )
+        if st.button("Save Document", key=f"exit_doc_save_{company_id}", type="primary"):
+            if uploaded_file is None:
+                st.warning("Please select a PDF file first.")
+            else:
+                doc_name = label_input.strip() if label_input.strip() else uploaded_file.name
+                file_bytes = uploaded_file.read()
+                save_exit_document(
+                    company_id=company_id,
+                    doc_name=doc_name,
+                    file_bytes=file_bytes,
+                    notes=notes_input.strip(),
+                )
+                st.success(f"✓ '{doc_name}' saved.")
+                st.rerun()
+
+
 # ── Cowrywise custom exit tab ────────────────────────────────────────────────
 
 def _render_cowrywise_exit_tab() -> None:
+    _cw_conn = _conn()
+    _cw_row  = _cw_conn.execute("SELECT id FROM companies WHERE name = %s", ("Cowrywise",)).fetchone()
+    _cw_conn.close()
+    _company_id_cw = _cw_row[0] if _cw_row else 0
+
     # ── Section 1: Exit Pathways (collapsed) ─────────────────────────────────
     AMBER     = "#FFC107"
     GREEN_DOT = "#D5FA94"
@@ -4112,10 +4280,17 @@ def _render_cowrywise_exit_tab() -> None:
                 unsafe_allow_html=True,
             )
 
+    _render_exit_deck_section(_company_id_cw, "Cowrywise")
+
 
 # ── VertoFX custom exit tab ──────────────────────────────────────────────────
 
 def _render_vertofx_exit_tab() -> None:
+    _vfx_conn = _conn()
+    _vfx_row  = _vfx_conn.execute("SELECT id FROM companies WHERE name = %s", ("Verto",)).fetchone()
+    _vfx_conn.close()
+    _company_id_verto = _vfx_row[0] if _vfx_row else 0
+
     # ── Section 1: Exit Pathways (collapsed) ─────────────────────────────────
     AMBER     = "#FFC107"
     GREEN_DOT = "#D5FA94"
@@ -4537,10 +4712,17 @@ def _render_vertofx_exit_tab() -> None:
                 unsafe_allow_html=True,
             )
 
+    _render_exit_deck_section(_company_id_verto, "Verto")
+
 
 # ── Lulalend custom exit tab ─────────────────────────────────────────────────
 
 def _render_lulalend_exit_tab() -> None:
+    _ll_conn = _conn()
+    _ll_row  = _ll_conn.execute("SELECT id FROM companies WHERE name = %s", ("Lulalend",)).fetchone()
+    _ll_conn.close()
+    _company_id_lula = _ll_row[0] if _ll_row else 0
+
     load_comps_detail.clear()
     load_comp_mapping.clear()
 
@@ -4950,10 +5132,23 @@ def _render_lulalend_exit_tab() -> None:
                 unsafe_allow_html=True,
             )
 
+    _render_exit_deck_section(_company_id_lula, "Lulalend")
+
 
 # ── Yoco custom exit tab ──────────────────────────────────────────────────────
 
 def _render_yoco_exit_tab() -> None:
+    # ── Exit deck section company_id lookup ──────────────────────
+    try:
+        _yoco_conn = _conn()
+        _yoco_cur  = _yoco_conn.cursor()
+        _yoco_cur.execute("SELECT id FROM companies WHERE name = %s", ("Yoco",))
+        _yoco_row  = _yoco_cur.fetchone()
+        _yoco_conn.close()
+        _company_id_yoco = _yoco_row[0] if _yoco_row else 1
+    except Exception:
+        _company_id_yoco = 1
+
     # ── Section 1: Exit Pathways (collapsed) ─────────────────────────────────
     AMBER = "#FFC107"
     GREEN_DOT = "#D5FA94"
@@ -5294,6 +5489,14 @@ def _render_yoco_exit_tab() -> None:
     }
     _PRIORITY_ORDER = [b[0] for b in local_buyers] + [b[0] for b in global_buyers]
 
+    st.markdown("<div style='background:red;color:white;padding:10px'>DEBUG: reached exit deck section</div>", unsafe_allow_html=True)
+    try:
+        _render_exit_deck_section(_company_id_yoco, "Yoco")
+    except Exception as e:
+        st.error(f"Exit deck section error: {e}")
+        import traceback
+        st.code(traceback.format_exc())
+
     if st.button("Generate Q3 2026 Exit Actions for Yoco"):
         ticked = [
             name for name in _PRIORITY_ORDER
@@ -5339,6 +5542,11 @@ def _render_yoco_exit_tab() -> None:
 # ── TWINCO custom exit tab ────────────────────────────────────────────────────
 
 def _render_twinco_exit_tab() -> None:
+    _tw_conn = _conn()
+    _tw_row  = _tw_conn.execute("SELECT id FROM companies WHERE name = %s", ("TWINCO",)).fetchone()
+    _tw_conn.close()
+    _company_id_twinco = _tw_row[0] if _tw_row else 0
+
     # ── Section 1: Exit Pathways (collapsed) ─────────────────────────────────
     AMBER     = "#FFC107"
     GREEN_DOT = "#D5FA94"
@@ -5764,6 +5972,8 @@ def _render_twinco_exit_tab() -> None:
                 unsafe_allow_html=True,
             )
 
+    _render_exit_deck_section(_company_id_twinco, "TWINCO")
+
 
 # ── MaxSoko custom exit tab ───────────────────────────────────────────────────
 
@@ -5802,6 +6012,7 @@ def _render_maxsoko_exit_tab() -> None:
         "SELECT id FROM companies WHERE name = 'MaxSoko' LIMIT 1", _conn()
     )
     _maxsoko_id = int(_ms_id_row.iloc[0]["id"]) if not _ms_id_row.empty else None
+    _company_id_maxsoko = _maxsoko_id or 0
     ltm_revenue = None
     if _maxsoko_id:
         _ltm_df = load_ltm_revenue(db_version=_db_global_version())
@@ -6353,6 +6564,8 @@ def _render_maxsoko_exit_tab() -> None:
     )
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    _render_exit_deck_section(_company_id_maxsoko, "MaxSoko")
 
 
 # ── Khazna custom exit tab ────────────────────────────────────────────────────
