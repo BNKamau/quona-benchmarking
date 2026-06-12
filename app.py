@@ -4242,6 +4242,9 @@ def _render_cowrywise_exit_tab() -> None:
         ("PiggyVest", "Medium",
          "Paid out NGN 835B ($547M) to users in 2024; exploring broader investment products",
          "Merger would create Nigeria's dominant retail savings and investment platform, strengthening exit narrative ahead of a larger strategic sale"),
+        ("ABSA", "High",
+         "Pan-African banking group; active in Nigeria wealth and asset management",
+         "ABSA's pan-African retail banking strategy and Nigeria wealth ambitions align directly with Cowrywise's platform and user base."),
     ]
 
     global_buyers = [
@@ -4263,6 +4266,30 @@ def _render_cowrywise_exit_tab() -> None:
     ]
 
     secondaries_buyers = [
+        ("LeapFrog Investments", "Very High",
+         "$1B+ funds; purpose-led EM financial services specialist",
+         "Perfect thesis fit — top conviction buyer alongside KKR. Financial inclusion mandate maps directly to Cowrywise's mass-market Nigeria wealth platform."),
+        ("Actis", "High",
+         "EM specialist with strong Africa track record; multiple Nigerian deals",
+         "Natural fit at this ticket size. Africa book and financial services focus make Cowrywise a strong candidate."),
+        ("DPI", "High",
+         "Pan-African PE; multiple fintech deals including FlapKap; existing Quona co-investment relationship",
+         "Strong warm intro path via Quona. DPI's fintech portfolio and Nigeria presence make Cowrywise a clear fit."),
+        ("AfricInvest", "High",
+         "Pan-African PE; financial services experience; active co-investor relationship with Quona",
+         "Already in Power Series A target list. Active co-investor relationship provides natural entry point."),
+        ("Helios Investment Partners", "Medium",
+         "Largest pan-African PE; financial services experience; looking at HR fintech space",
+         "Pan-African scale and financial services track record. Lower conviction than DPI and LeapFrog but in scope."),
+        ("Warburg Pincus", "Medium",
+         "Financial services focus; has done African deals; growth equity bracket fits trajectory",
+         "In scope if Cowrywise targets $100M+ ARR. Financial services specialisation is relevant."),
+        ("General Atlantic", "Medium",
+         "Did Network International; knows MEA financial services; growth equity",
+         "Digital wealth angle maps to their portfolio. MEA financial services track record is relevant."),
+        ("Verod Capital / Adenia Partners", "Medium",
+         "Verod is Nigerian PE; Adenia is pan-African; both credible at this ticket size",
+         "Lower priority than DPI and AfricInvest but both are in scope. Verod's Nigeria focus is directly relevant."),
         ("Alphacode", "High",
          "$80M deployed across SA and Nigerian fintechs; latest deal August 2025",
          "Cowrywise is the leading Nigeria wealthtech — natural fit for Alphacode's fintech portfolio and RMI's wealth management ambitions"),
@@ -5494,6 +5521,18 @@ def _render_yoco_exit_tab() -> None:
          "Enable card and QR acceptance for small sellers linking in-store to marketplace."),
         ("TransUnion",  "Low-Medium","SME data solutions SA (2023)",
          "Real-time merchant data overlap with existing bank and telco feeds."),
+        ("Sipay",    "Medium", "Entered UAE; South Africa explicitly on radar",
+         "Yoco provides instant credibility and merchant scale in SA. Appetite appears genuine given stated plans, though Africa execution track record is unproven."),
+        ("Hala",     "Low-Medium", "Expanding beyond Saudi and GCC",
+         "Yoco is a natural SA entry vehicle with a ready SME base. Prefers organic growth over acquisition."),
+        ("Block",    "Low",    "No Africa activity; focused on US, EU, Asia Pacific",
+         "Perfect model fit — Yoco is effectively Square for Africa. No emerging market interest currently."),
+        ("PayPal",   "Low",    "Deprioritised Africa and emerging markets",
+         "Strong model alignment via iZettle playbook but PayPal has explicitly deprioritised SA. Appetite limited."),
+        ("Revolut",  "Low",    "Expanding acquiring and merchant services in new markets",
+         "Yoco would give Revolut a turnkey SA entry. Loss-making and Africa far below current priority markets."),
+        ("CreditInfo Group", "Low-Medium", "Acquired Experian Uganda and Namibia bureaus; launched SME360",
+         "Live POS data would strengthen CreditInfo's SME product in southern markets. M&A capacity limited — likely partnership first."),
     ]
 
     secondaries_buyers = [
