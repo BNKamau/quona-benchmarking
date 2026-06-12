@@ -100,6 +100,30 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# ── Temporary migration route — remove after exit_documents table is created ──
+if st.query_params.get("run_migration") == "exit_docs":
+    try:
+        conn = _conn()
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS exit_documents (
+                id          SERIAL PRIMARY KEY,
+                company_id  INTEGER NOT NULL,
+                doc_name    TEXT    NOT NULL,
+                doc_type    TEXT    NOT NULL DEFAULT 'exit_planning',
+                file_data   BYTEA   NOT NULL,
+                file_size   INTEGER,
+                uploaded_by TEXT    DEFAULT '',
+                uploaded_at TEXT    NOT NULL DEFAULT (now()::text),
+                notes       TEXT    DEFAULT ''
+            )
+        """)
+        conn.commit()
+        conn.close()
+        st.success("✓ exit_documents table created (or already existed).")
+    except Exception as e:
+        st.error(f"Migration failed: {e}")
+    st.stop()
+
 # ── Brand palette ─────────────────────────────────────────────────────────────
 GREEN  = "#D5FA94"
 BLACK  = "#2C2C2A"
