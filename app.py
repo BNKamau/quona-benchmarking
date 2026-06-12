@@ -3777,18 +3777,86 @@ def _render_exit_deck_section(company_id: int, company_name: str) -> None:
 
     view_key = f"viewing_doc_{company_id}"
 
-    # Inline PDF viewer — rendered above the document list
+    # Inline PDF viewer using PDF.js — rendered above the document list
     if st.session_state.get(view_key):
         doc_id = st.session_state[view_key]
         raw = get_exit_document(doc_id)
         if raw:
             b64 = base64.b64encode(raw).decode("utf-8")
-            pdf_html = (
-                f'<iframe src="data:application/pdf;base64,{b64}" '
-                f'width="100%" height="900px" '
-                f'style="border:1px solid #D4D5CE;border-radius:8px"></iframe>'
-            )
-            components.html(pdf_html, height=920, scrolling=False)
+            pdfjs_html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ background: #2C2C2A; font-family: sans-serif; }}
+  #controls {{
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; background: #2C2C2A; border-bottom: 1px solid #3a3a38;
+  }}
+  #controls button {{
+    background: #D5FA94; color: #2C2C2A; border: none; border-radius: 5px;
+    padding: 5px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }}
+  #controls button:disabled {{ background: #555; color: #999; cursor: default; }}
+  #page-info {{ color: #D4D5CE; font-size: 13px; }}
+  #canvas-container {{
+    display: flex; justify-content: center;
+    padding: 16px; height: 830px; overflow-y: auto; background: #2C2C2A;
+  }}
+  canvas {{ box-shadow: 0 2px 12px rgba(0,0,0,0.5); border-radius: 4px; }}
+</style>
+</head>
+<body>
+<div id="controls">
+  <button id="prev" disabled>&#8592; Prev</button>
+  <span id="page-info">Page 1 of ?</span>
+  <button id="next" disabled>Next &#8594;</button>
+</div>
+<div id="canvas-container">
+  <canvas id="pdf-canvas"></canvas>
+</div>
+<script>
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+  const b64 = "{b64}";
+  const raw = atob(b64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+
+  let pdfDoc = null, currentPage = 1, scale = 1.4;
+  const canvas = document.getElementById("pdf-canvas");
+  const ctx = canvas.getContext("2d");
+  const prevBtn = document.getElementById("prev");
+  const nextBtn = document.getElementById("next");
+  const pageInfo = document.getElementById("page-info");
+
+  function renderPage(num) {{
+    pdfDoc.getPage(num).then(page => {{
+      const vp = page.getViewport({{ scale }});
+      canvas.width = vp.width;
+      canvas.height = vp.height;
+      page.render({{ canvasContext: ctx, viewport: vp }}).promise.then(() => {{
+        pageInfo.textContent = "Page " + num + " of " + pdfDoc.numPages;
+        prevBtn.disabled = num <= 1;
+        nextBtn.disabled = num >= pdfDoc.numPages;
+      }});
+    }});
+  }}
+
+  pdfjsLib.getDocument({{ data: bytes }}).promise.then(pdf => {{
+    pdfDoc = pdf;
+    renderPage(1);
+  }});
+
+  prevBtn.addEventListener("click", () => {{ if (currentPage > 1) renderPage(--currentPage); }});
+  nextBtn.addEventListener("click", () => {{ if (currentPage < pdfDoc.numPages) renderPage(++currentPage); }});
+</script>
+</body>
+</html>"""
+            components.html(pdfjs_html, height=880, scrolling=False)
             if st.button("Close viewer", key=f"close_viewer_{company_id}"):
                 st.session_state[view_key] = None
                 st.rerun()
