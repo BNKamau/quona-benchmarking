@@ -498,31 +498,6 @@ def delete_exit_document(doc_id: int) -> None:
     conn.close()
 
 
-if st.query_params.get("run_migration") == "exit_docs":
-    try:
-        conn = _conn()
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS exit_documents (
-                id          SERIAL PRIMARY KEY,
-                company_id  INTEGER NOT NULL,
-                doc_name    TEXT    NOT NULL,
-                doc_type    TEXT    NOT NULL DEFAULT 'exit_planning',
-                file_data   BYTEA   NOT NULL,
-                file_size   INTEGER,
-                uploaded_by TEXT    DEFAULT '',
-                uploaded_at TEXT    NOT NULL DEFAULT (now()::text),
-                notes       TEXT    DEFAULT ''
-            )
-        """)
-        conn.commit()
-        conn.close()
-        st.success("✓ exit_documents table created successfully.")
-    except Exception as e:
-        st.error(f"Migration failed: {e}")
-    st.stop()
-
-
 # ── Exit comps DB helpers ──────────────────────────────────────────────────────
 COMPS_DB = os.path.join(_HERE, "data", "quona_exit_comps.db")
 _COMP_NAME_MAP = {"VertoFX": "Verto FX"}  # benchmarking.db name → portfolio_comp_mapping name
@@ -5514,13 +5489,7 @@ def _render_yoco_exit_tab() -> None:
     }
     _PRIORITY_ORDER = [b[0] for b in local_buyers] + [b[0] for b in global_buyers]
 
-    st.markdown("<div style='background:red;color:white;padding:10px'>DEBUG: reached exit deck section</div>", unsafe_allow_html=True)
-    try:
-        _render_exit_deck_section(_company_id_yoco, "Yoco")
-    except Exception as e:
-        st.error(f"Exit deck section error: {e}")
-        import traceback
-        st.code(traceback.format_exc())
+    _render_exit_deck_section(_company_id_yoco, "Yoco")
 
     if st.button("Generate Q3 2026 Exit Actions for Yoco"):
         ticked = [
