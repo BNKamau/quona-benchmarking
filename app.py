@@ -3765,6 +3765,9 @@ def fetch_last_affinity_note_for_buyer(buyer_name: str, affinity_api_key: str) -
 
 def _render_exit_deck_section(company_id: int, company_name: str) -> None:
     """Render the exit document upload/view section at the bottom of any exit tab."""
+    import base64
+    import streamlit.components.v1 as components
+
     st.markdown("<div style='height:32px'></div>", unsafe_allow_html=True)
     st.markdown(
         f"<div style='font-size:11px;font-weight:700;letter-spacing:.8px;"
@@ -3772,12 +3775,32 @@ def _render_exit_deck_section(company_id: int, company_name: str) -> None:
         unsafe_allow_html=True,
     )
 
+    view_key = f"viewing_doc_{company_id}"
+
+    # Inline PDF viewer — rendered above the document list
+    if st.session_state.get(view_key):
+        doc_id = st.session_state[view_key]
+        raw = get_exit_document(doc_id)
+        if raw:
+            b64 = base64.b64encode(raw).decode("utf-8")
+            pdf_html = (
+                f'<iframe src="data:application/pdf;base64,{b64}" '
+                f'width="100%" height="900px" '
+                f'style="border:1px solid #D4D5CE;border-radius:8px"></iframe>'
+            )
+            components.html(pdf_html, height=920, scrolling=False)
+            if st.button("Close viewer", key=f"close_viewer_{company_id}"):
+                st.session_state[view_key] = None
+                st.rerun()
+        else:
+            st.session_state[view_key] = None
+
     docs = list_exit_documents(company_id)
     if docs:
         for doc in docs:
             size_kb = f"{doc['file_size'] // 1024:,} KB" if doc['file_size'] else "—"
             date_str = doc['uploaded_at'][:10] if doc['uploaded_at'] else "—"
-            col_name, col_meta, col_dl, col_del = st.columns([3, 2, 1.2, 0.8])
+            col_name, col_meta, col_read, col_dl, col_del = st.columns([3, 2, 1, 1.2, 0.8])
             with col_name:
                 st.markdown(
                     f"<div style='font-size:13px;font-weight:600;color:#2C2C2A;padding-top:6px'>"
@@ -3791,11 +3814,15 @@ def _render_exit_deck_section(company_id: int, company_name: str) -> None:
                     f"<div style='font-size:12px;color:{MUTED};padding-top:6px'>{size_kb} · {date_str}</div>",
                     unsafe_allow_html=True,
                 )
+            with col_read:
+                if st.button("📖 Read", key=f"read_exitdoc_{doc['id']}"):
+                    st.session_state[view_key] = doc['id']
+                    st.rerun()
             with col_dl:
                 raw = get_exit_document(doc['id'])
                 if raw:
                     st.download_button(
-                        label="📥 View",
+                        label="📥 Download",
                         data=raw,
                         file_name=doc['doc_name'] if doc['doc_name'].endswith('.pdf') else doc['doc_name'] + '.pdf',
                         mime="application/pdf",
