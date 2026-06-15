@@ -4731,6 +4731,12 @@ def _render_vertofx_exit_tab() -> None:
         ("Blue Earth Capital", "Low",
          "GP-led secondary in Moniepoint (Oct 2025); impact-focused Africa secondaries strategy",
          "Verto's financial inclusion angle is weaker than typical Blue Earth targets — lower fit unless impact narrative is strengthened"),
+        ("Lightrock", "High",
+         "Impact-focused growth equity; $2B+ AUM; active in African fintech",
+         "Lightrock's financial inclusion thesis and B2B fintech focus maps directly to VertoFX's cross-border payments corridor for African businesses."),
+        ("Apis Partners", "High",
+         "Specialist financial services growth equity; $1.5B+ AUM; multiple African fintech investments",
+         "Apis has deep fintech expertise in emerging markets and has backed B2B payments and FX players. VertoFX's enterprise corridor business is a strong fit for their mandate."),
     ]
 
     affinity_cache = st.session_state.get("vertofx_affinity_data")
