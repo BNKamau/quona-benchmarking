@@ -3284,30 +3284,31 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str, str] | tupl
             if m:
                 year_folders.append((f, int(m.group())))
 
+        st.write(f"  DEBUG source_folder={source_folder.name!r} year_folders={[f.name for f,_ in year_folders]}")
+
         if not year_folders:
-            # No year subfolders — try files directly in the source folder
             for f in year_items:
                 if f.type.value != "file":
                     continue
                 nl = f.name.lower()
-                if nl.endswith(".xlsx"):
+                mod = getattr(f, "modified_at", None)
+                if nl.endswith(".xlsx") or nl.endswith(".pdf"):
+                    ft = "xlsx" if nl.endswith(".xlsx") else "pdf"
+                    st.write(f"    DEBUG direct file: {f.name!r} modified_at={mod!r}")
                     collected.append({"id": f.id, "name": f.name,
-                                      "modified_at": getattr(f, "modified_at", ""),
-                                      "file_type": "xlsx"})
-                elif nl.endswith(".pdf"):
-                    collected.append({"id": f.id, "name": f.name,
-                                      "modified_at": getattr(f, "modified_at", ""),
-                                      "file_type": "pdf"})
+                                      "modified_at": mod or "",
+                                      "file_type": ft})
             return collected
 
-        # Iterate over all year folders, most recent first
         for year_folder, _ in sorted(year_folders, key=lambda x: x[1], reverse=True):
             month_items = client.folders.get_folder_items(year_folder.id, limit=200).entries
             month_folders = [i for i in month_items if i.type.value == "folder"]
 
+            st.write(f"  DEBUG year={year_folder.name!r} month_folders={[f.name for f in month_folders]}")
+
             if not month_folders:
-                # Files directly in year folder
                 candidates = month_items
+                st.write(f"  DEBUG no month subfolders — using year folder directly")
             else:
                 def _month_sort(f):
                     try:
@@ -3315,22 +3316,22 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str, str] | tupl
                     except Exception:
                         return 0
                 latest_month = sorted(month_folders, key=_month_sort, reverse=True)[0]
+                st.write(f"  DEBUG selected month={latest_month.name!r}")
                 candidates = client.folders.get_folder_items(latest_month.id, limit=200).entries
 
             for f in candidates:
                 if f.type.value != "file":
                     continue
                 nl = f.name.lower()
-                if nl.endswith(".xlsx"):
+                mod = getattr(f, "modified_at", None)
+                if nl.endswith(".xlsx") or nl.endswith(".pdf"):
+                    ft = "xlsx" if nl.endswith(".xlsx") else "pdf"
+                    st.write(f"    DEBUG candidate: {f.name!r} modified_at={mod!r} type={ft}")
                     collected.append({"id": f.id, "name": f.name,
-                                      "modified_at": getattr(f, "modified_at", ""),
-                                      "file_type": "xlsx"})
-                elif nl.endswith(".pdf"):
-                    collected.append({"id": f.id, "name": f.name,
-                                      "modified_at": getattr(f, "modified_at", ""),
-                                      "file_type": "pdf"})
+                                      "modified_at": mod or "",
+                                      "file_type": ft})
             if collected:
-                break  # stop at first year that has files
+                break
 
         return collected
 
@@ -3369,7 +3370,6 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str, str] | tupl
             return None, None, None
 
         # Step 1: Find company folder inside Portfolio Companies
-        # Box folders have numeric prefixes (e.g. "21 Verto", "04 Lulalend")
         items = client.folders.get_folder_items(portfolio_folder_id, limit=200).entries
         cn_lower = company_name.lower()
         company_folder = None
@@ -3407,7 +3407,10 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str, str] | tupl
             except Exception:
                 pass
         if not company_folder:
+            st.write(f"DEBUG company folder not found for {company_name!r}")
             return None, None, None
+
+        st.write(f"DEBUG company_folder={company_folder.name!r} [{company_folder.id}]")
 
         # Step 2: Find both Management Accounts and Board Meetings folders
         sub_items = client.folders.get_folder_items(company_folder.id, limit=200).entries
@@ -3421,8 +3424,13 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str, str] | tupl
 
         source_folders = []
         for sf in sub_folders:
-            if _score_folder(sf, MGMT_KEYWORDS) > 0 or _score_folder(sf, BOARD_KEYWORDS) > 0:
+            ms = _score_folder(sf, MGMT_KEYWORDS)
+            bs = _score_folder(sf, BOARD_KEYWORDS)
+            if ms > 0 or bs > 0:
                 source_folders.append(sf)
+                st.write(f"DEBUG source_folder matched: {sf.name!r} mgmt_score={ms} board_score={bs}")
+            else:
+                st.write(f"DEBUG subfolder skipped: {sf.name!r}")
 
         # If nothing matched keywords, fall back to Claude picking the best single folder
         if not source_folders:
@@ -3445,9 +3453,11 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str, str] | tupl
                 _idx = int(_msg.content[0].text.strip())
                 if 0 <= _idx < len(sub_folders):
                     source_folders = [sub_folders[_idx]]
+                    st.write(f"DEBUG Claude fallback selected: {sub_folders[_idx].name!r}")
             except Exception:
                 pass
         if not source_folders:
+            st.write("DEBUG no source folders found — aborting")
             return None, None, None
 
         # Step 3: Collect all xlsx/pdf candidates from every source folder
@@ -3455,12 +3465,16 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str, str] | tupl
         for sf in source_folders:
             all_candidates.extend(_collect_files_from_source(sf))
 
+        st.write(f"DEBUG all_candidates ({len(all_candidates)}):")
+        for c in all_candidates:
+            st.write(f"  {c['name']!r}  modified_at={c['modified_at']!r}  type={c['file_type']}")
+
         if not all_candidates:
             return None, None, None
 
         # Step 4: Pick the single most recently modified file
-        # modified_at is an ISO string from Box; lexicographic sort works for ISO dates
         target = sorted(all_candidates, key=lambda x: x["modified_at"], reverse=True)[0]
+        st.write(f"DEBUG selected target: {target['name']!r}  modified_at={target['modified_at']!r}")
 
         # Step 5: Download file content as bytes
         response = client.downloads.download_file(target["id"])
