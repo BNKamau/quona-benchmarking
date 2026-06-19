@@ -3256,17 +3256,21 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
     Navigate Box folder structure to find the most recent KPI xlsx for a company.
 
     Path: Root → Fund folder → Portfolio Companies folder → Company folder
-          → 02 Management Accounts → most recent year folder
+          → Management Accounts → most recent year folder
           → most recent month folder → most recent .xlsx file
 
     Returns (file_bytes, filename) or (None, None) if not found.
     """
+    import re as _re
+
+    def _strip_prefix(name: str) -> str:
+        return _re.sub(r'^\d+\s*', '', name).lower()
+
     try:
         from box_sdk_gen import BoxClient, BoxDeveloperTokenAuth
 
         token = st.secrets.get("BOX_DEV_TOKEN", "")
         if not token:
-            st.write("DEBUG: No BOX_DEV_TOKEN found in secrets")
             return None, None
 
         auth   = BoxDeveloperTokenAuth(token=token)
@@ -3287,47 +3291,59 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
 
         # Exact match first; fall back to case-insensitive partial match
         portfolio_folder_id = FUND_MAP.get(company_name)
-        st.write(f"DEBUG [1] company_name={company_name!r}  exact FUND_MAP lookup → {portfolio_folder_id!r}")
         if not portfolio_folder_id:
             cn_lower = company_name.lower()
             for key, fid in FUND_MAP.items():
                 if cn_lower in key.lower() or key.lower() in cn_lower:
                     portfolio_folder_id = fid
-                    st.write(f"DEBUG [1b] partial match: key={key!r} → folder_id={fid!r}")
                     break
         if not portfolio_folder_id:
-            st.write("DEBUG [1c] No FUND_MAP match — aborting")
             return None, None
 
-        # Step 2: List all folders in Portfolio Companies folder
-        st.write(f"DEBUG [2] Listing portfolio folder id={portfolio_folder_id}")
+        # Step 1: Find company folder inside Portfolio Companies
+        # Box folders have numeric prefixes (e.g. "21 Verto", "04 Lulalend")
+        # Strip leading digits+spaces before comparing, match in both directions
         items = client.folders.get_folder_items(portfolio_folder_id, limit=200).entries
-        folder_names = [(i.id, i.name) for i in items if i.type.value == "folder"]
-        st.write(f"DEBUG [2] All subfolders ({len(folder_names)}):")
-        for fid, fname in folder_names:
-            st.write(f"  [{fid}] {fname}")
+        cn_lower = company_name.lower()
+        company_folder = None
+        for i in items:
+            if i.type.value != "folder":
+                continue
+            stripped = _strip_prefix(i.name)
+            if cn_lower in stripped or stripped in cn_lower:
+                company_folder = i
+                break
 
-        # Step 3: Find company folder
-        company_folder = next(
-            (i for i in items
-             if i.type.value == "folder"
-             and company_name.lower() in i.name.lower()),
-            None
-        )
+        # Fallback: ask Claude to pick when partial matching fails
         if not company_folder:
-            st.write(f"DEBUG [3] No company folder found matching {company_name!r} — aborting")
+            folder_candidates = [i for i in items if i.type.value == "folder"]
+            try:
+                import anthropic as _anthropic
+                _lines = "\n".join(
+                    f"{idx}: {f.name}" for idx, f in enumerate(folder_candidates[:20])
+                )
+                _ac = _anthropic.Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY", ""))
+                _msg = _ac.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=5,
+                    messages=[{
+                        "role": "user",
+                        "content": (
+                            f"Which folder index best matches the company '{company_name}'? "
+                            f"Reply with only the integer index.\n{_lines}"
+                        ),
+                    }],
+                )
+                _idx = int(_msg.content[0].text.strip())
+                if 0 <= _idx < len(folder_candidates):
+                    company_folder = folder_candidates[_idx]
+            except Exception:
+                pass
+        if not company_folder:
             return None, None
-        st.write(f"DEBUG [3] Matched company folder: [{company_folder.id}] {company_folder.name!r}")
 
-        # Step 4: List all subfolders inside the company folder
-        st.write(f"DEBUG [4] Listing company folder id={company_folder.id}")
+        # Step 2: Find management accounts folder — fuzzy keyword scoring
         sub_items = client.folders.get_folder_items(company_folder.id, limit=200).entries
-        sub_folders = [i for i in sub_items if i.type.value == "folder"]
-        st.write(f"DEBUG [4] All subfolders ({len(sub_folders)}):")
-        for sf in sub_folders:
-            st.write(f"  [{sf.id}] {sf.name}")
-
-        # Step 5: Find management accounts folder — fuzzy keyword scoring
         _mgmt_kws = [
             "management account", "financial statement", "monthly financial",
             "financials", "kpi", "reporting", "accounts", "monthly report",
@@ -3338,17 +3354,12 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
             n = folder.name.lower()
             return sum(1 for kw in _mgmt_kws if kw in n)
 
+        sub_folders = [i for i in sub_items if i.type.value == "folder"]
         scored = sorted(sub_folders, key=_mgmt_score, reverse=True)
-        st.write("DEBUG [5] Subfolder keyword scores:")
-        for sf in scored:
-            st.write(f"  score={_mgmt_score(sf)}  [{sf.id}] {sf.name}")
-
         if scored and _mgmt_score(scored[0]) > 0:
             mgmt_folder = scored[0]
-            st.write(f"DEBUG [5] Selected mgmt folder by score: [{mgmt_folder.id}] {mgmt_folder.name!r}")
         else:
             # All score 0 — ask Claude to pick
-            st.write("DEBUG [5] All scores 0 — falling back to Claude")
             mgmt_folder = None
             try:
                 import anthropic as _anthropic
@@ -3369,52 +3380,38 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
                     }],
                 )
                 _idx = int(_msg.content[0].text.strip())
-                st.write(f"DEBUG [5b] Claude picked index {_idx}")
                 if 0 <= _idx < len(sub_folders):
                     mgmt_folder = sub_folders[_idx]
-                    st.write(f"DEBUG [5b] Claude selected: [{mgmt_folder.id}] {mgmt_folder.name!r}")
-            except Exception as _ce:
-                st.write(f"DEBUG [5b] Claude fallback failed: {_ce}")
+            except Exception:
+                pass
         if not mgmt_folder:
-            st.write("DEBUG [5] No mgmt folder found — aborting")
             return None, None
 
-        # Step 6: Find most recent year folder — handles "2026", "FY2026", "FY 2026"
-        import re as _re
-        st.write(f"DEBUG [6] Listing year folders in [{mgmt_folder.id}] {mgmt_folder.name!r}")
+        # Step 3: Find most recent year folder — handles "2026", "FY2026", "FY 2026"
         year_items = client.folders.get_folder_items(mgmt_folder.id, limit=200).entries
         year_folders = []
-        st.write(f"DEBUG [6] All items ({len(year_items)}):")
         for f in year_items:
-            m = _re.search(r'20\d{2}', f.name) if f.type.value == "folder" else None
-            st.write(f"  type={f.type.value}  [{f.id}] {f.name}  year_match={m.group() if m else None}")
-            if f.type.value == "folder" and m:
+            if f.type.value != "folder":
+                continue
+            m = _re.search(r'20\d{2}', f.name)
+            if m:
                 year_folders.append((f, int(m.group())))
         if not year_folders:
-            st.write("DEBUG [6] No year folders found — aborting")
             return None, None
         latest_year = sorted(year_folders, key=lambda x: x[1], reverse=True)[0][0]
-        st.write(f"DEBUG [6] Selected year folder: [{latest_year.id}] {latest_year.name!r}")
 
-        # Step 7: Find most recent month folder (named e.g. "03 2026", "01 2026")
-        st.write(f"DEBUG [7] Listing month folders in [{latest_year.id}] {latest_year.name!r}")
+        # Step 4: Find most recent month folder (named e.g. "03 2026", "01 2026")
         month_items = client.folders.get_folder_items(latest_year.id, limit=200).entries
         month_folders = [i for i in month_items if i.type.value == "folder"]
-        st.write(f"DEBUG [7] All items ({len(month_items)}):")
-        for f in month_items:
-            st.write(f"  type={f.type.value}  [{f.id}] {f.name}")
-
         if not month_folders:
-            st.write("DEBUG [7] No month subfolders — looking for xlsx directly in year folder")
+            # No month subfolders — look for xlsx directly in year folder
             xlsx_files = [
                 i for i in month_items
                 if i.type.value == "file" and i.name.lower().endswith(".xlsx")
             ]
             if not xlsx_files:
-                st.write("DEBUG [7] No xlsx files found in year folder — aborting")
                 return None, None
             target_file = xlsx_files[0]
-            st.write(f"DEBUG [7] Using xlsx directly: [{target_file.id}] {target_file.name!r}")
         else:
             def _month_sort(f):
                 try:
@@ -3422,31 +3419,22 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
                 except Exception:
                     return 0
             latest_month = sorted(month_folders, key=_month_sort, reverse=True)[0]
-            st.write(f"DEBUG [7] Selected month folder: [{latest_month.id}] {latest_month.name!r}")
 
-            # Step 8: Find most recent xlsx in month folder
-            st.write(f"DEBUG [8] Listing files in month folder [{latest_month.id}]")
+            # Step 5: Find most recent xlsx in month folder
             file_items = client.folders.get_folder_items(latest_month.id, limit=200).entries
-            st.write(f"DEBUG [8] All items ({len(file_items)}):")
-            for f in file_items:
-                st.write(f"  type={f.type.value}  [{f.id}] {f.name}")
             xlsx_files = [
                 i for i in file_items
                 if i.type.value == "file" and i.name.lower().endswith(".xlsx")
             ]
             if not xlsx_files:
-                st.write("DEBUG [8] No xlsx files found in month folder — aborting")
                 return None, None
             target_file = xlsx_files[0]
-            st.write(f"DEBUG [8] Target file: [{target_file.id}] {target_file.name!r}")
 
-        # Step 9: Download file content as bytes
-        st.write(f"DEBUG [9] Downloading file [{target_file.id}] {target_file.name!r}")
+        # Step 6: Download file content as bytes
         import io
         buffer = io.BytesIO()
         client.downloads.download_file(target_file.id, destination_file=buffer)
         buffer.seek(0)
-        st.write("DEBUG [9] Download complete")
         return buffer.read(), target_file.name
 
     except Exception as e:
