@@ -3432,8 +3432,15 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
 
         # Step 6: Download file content as bytes
         import io
+        response = client.downloads.download_file(target_file.id)
         buffer = io.BytesIO()
-        client.downloads.download_file(target_file.id, destination_file=buffer)
+        if hasattr(response, 'read'):
+            buffer.write(response.read())
+        elif hasattr(response, 'iter_content'):
+            for chunk in response.iter_content(chunk_size=8192):
+                buffer.write(chunk)
+        else:
+            buffer.write(response)
         buffer.seek(0)
         return buffer.read(), target_file.name
 
