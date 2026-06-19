@@ -3846,18 +3846,37 @@ def fetch_last_affinity_note_for_buyer(
             except Exception:
                 pass
 
-        # ── Claude-generated snippet ──────────────────────────────────────────
+        # ── Exit-relevance keyword filter — Pass 1 ───────────────────────────
+        company_ctx = company_being_exited or "the portfolio company"
+        _exit_kws = list(dict.fromkeys(kw for kw in [
+            "acquisition", "acquire", "acquirer", "m&a", "strategic",
+            "exit", "secondary", "liquidity", "sell", "sale", "buyer",
+            "term sheet", "loi", "due diligence", "valuation", "offer",
+            "interest", "mandate", "process", "banker", "transaction",
+            "verto", "yoco", "lulalend", "cowrywise",
+            company_being_exited.lower(),
+        ] if kw))
+
+        def _kw_score(n):
+            body = (n.get("content") or "").lower()
+            return sum(1 for kw in _exit_kws if kw in body)
+
+        # Sort: keyword relevance DESC, then created_at DESC as tiebreaker
+        # (deduped is already sorted by created_at DESC — stable sort preserves order within equal scores)
+        scored_notes = sorted(deduped, key=lambda n: (_kw_score(n), _note_dt(n)), reverse=True)
         top3 = [
             (n.get("content") or "").strip()
-            for n in deduped[:3]
+            for n in scored_notes[:3]
             if (n.get("content") or "").strip()
         ]
+
+        # ── Claude snippet — Pass 2 ───────────────────────────────────────────
+        _NO_RELEVANT = "No exit-relevant discussion found."
         snippet = None
         try:
             anth_key = st.secrets.get("ANTHROPIC_API_KEY", "")
             if anth_key and top3:
                 _client = _anthropic.Anthropic(api_key=anth_key)
-                company_ctx = company_being_exited or "the portfolio company"
                 notes_block = "\n---\n".join(top3)
                 _msg = _client.messages.create(
                     model="claude-haiku-4-5-20251001",
@@ -3871,9 +3890,10 @@ def fetch_last_affinity_note_for_buyer(
                             f"Notes:\n{notes_block}\n\n"
                             f"Write a single sentence (max 25 words) summarizing: who spoke to whom, "
                             f"what was discussed as it relates to the acquisition, and what the next step is. "
-                            f"If the notes are not related to an acquisition discussion, say "
-                            f"'No exit-relevant discussion found in recent notes.' "
-                            f"Do not mention fundraising, LP relations, or topics unrelated to M&A."
+                            f"If none of these notes discuss an acquisition, investment, or exit relating to "
+                            f"{company_ctx}, respond with exactly: '{_NO_RELEVANT}' "
+                            f"Do not summarize unrelated content about LP fundraising, portfolio construction, "
+                            f"or general market commentary."
                         ),
                     }],
                 )
@@ -3882,7 +3902,12 @@ def fetch_last_affinity_note_for_buyer(
             pass
 
         if not snippet:
-            snippet = (deduped[0].get("content") or "").strip()[:120] or "Note found — no content available"
+            raw = (deduped[0].get("content") or "").strip()
+            if len(raw) > 180:
+                raw = raw[:180]
+                cut = raw.rfind(" ")
+                raw = raw[:cut] if cut > 0 else raw
+            snippet = raw or "Note found — no content available"
 
         return {
             "date":         date_str,
@@ -4308,7 +4333,7 @@ def _render_cowrywise_exit_tab() -> None:
                 f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
                 unsafe_allow_html=True,
             )
-            cols = st.columns([2, 2, 3, 1, 2])
+            cols = st.columns([2, 2, 3, 1, 3])
             with cols[0]:
                 st.markdown(
                     f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
@@ -4352,9 +4377,11 @@ def _render_cowrywise_exit_tab() -> None:
                             unsafe_allow_html=True,
                         )
                     else:
+                        _snip = note.get("snippet") or ""
+                        _snip_style = "font-style:italic;" if _snip == "No exit-relevant discussion found." else ""
                         st.markdown(
                             f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
-                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            f"<div style='font-size:11px;color:{MUTED};{_snip_style}'>{_snip}</div>",
                             unsafe_allow_html=True,
                         )
             st.markdown("</div>", unsafe_allow_html=True)
@@ -4457,7 +4484,7 @@ def _render_cowrywise_exit_tab() -> None:
     )
 
     def _header_row():
-        hcols  = st.columns([2, 2, 3, 1, 2])
+        hcols  = st.columns([2, 2, 3, 1, 3])
         labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage Q3?", "Last Affinity Contact"]
         for hc, lbl in zip(hcols, labels):
             with hc:
@@ -4776,7 +4803,7 @@ def _render_vertofx_exit_tab() -> None:
                 f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
                 unsafe_allow_html=True,
             )
-            cols = st.columns([2, 2, 3, 1, 2])
+            cols = st.columns([2, 2, 3, 1, 3])
             with cols[0]:
                 st.markdown(
                     f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
@@ -4820,9 +4847,11 @@ def _render_vertofx_exit_tab() -> None:
                             unsafe_allow_html=True,
                         )
                     else:
+                        _snip = note.get("snippet") or ""
+                        _snip_style = "font-style:italic;" if _snip == "No exit-relevant discussion found." else ""
                         st.markdown(
                             f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
-                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            f"<div style='font-size:11px;color:{MUTED};{_snip_style}'>{_snip}</div>",
                             unsafe_allow_html=True,
                         )
             st.markdown("</div>", unsafe_allow_html=True)
@@ -4910,7 +4939,7 @@ def _render_vertofx_exit_tab() -> None:
     )
 
     def _header_row():
-        hcols  = st.columns([2, 2, 3, 1, 2])
+        hcols  = st.columns([2, 2, 3, 1, 3])
         labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage Q3?", "Last Affinity Contact"]
         for hc, lbl in zip(hcols, labels):
             with hc:
@@ -5221,7 +5250,7 @@ def _render_lulalend_exit_tab() -> None:
                 f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
                 unsafe_allow_html=True,
             )
-            cols = st.columns([2, 2, 3, 1, 2])
+            cols = st.columns([2, 2, 3, 1, 3])
             with cols[0]:
                 st.markdown(
                     f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
@@ -5265,9 +5294,11 @@ def _render_lulalend_exit_tab() -> None:
                             unsafe_allow_html=True,
                         )
                     else:
+                        _snip = note.get("snippet") or ""
+                        _snip_style = "font-style:italic;" if _snip == "No exit-relevant discussion found." else ""
                         st.markdown(
                             f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
-                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            f"<div style='font-size:11px;color:{MUTED};{_snip_style}'>{_snip}</div>",
                             unsafe_allow_html=True,
                         )
             st.markdown("</div>", unsafe_allow_html=True)
@@ -5332,7 +5363,7 @@ def _render_lulalend_exit_tab() -> None:
     )
 
     def _header_row():
-        hcols  = st.columns([2, 2, 3, 1, 2])
+        hcols  = st.columns([2, 2, 3, 1, 3])
         labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage Q3?", "Last Affinity Contact"]
         for hc, lbl in zip(hcols, labels):
             with hc:
@@ -5588,7 +5619,7 @@ def _render_yoco_exit_tab() -> None:
                 f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
                 unsafe_allow_html=True,
             )
-            cols = st.columns([2, 2, 3, 1, 2])
+            cols = st.columns([2, 2, 3, 1, 3])
             with cols[0]:
                 st.markdown(
                     f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
@@ -5632,9 +5663,11 @@ def _render_yoco_exit_tab() -> None:
                             unsafe_allow_html=True,
                         )
                     else:
+                        _snip = note.get("snippet") or ""
+                        _snip_style = "font-style:italic;" if _snip == "No exit-relevant discussion found." else ""
                         st.markdown(
                             f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
-                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            f"<div style='font-size:11px;color:{MUTED};{_snip_style}'>{_snip}</div>",
                             unsafe_allow_html=True,
                         )
             st.markdown("</div>", unsafe_allow_html=True)
@@ -5729,7 +5762,7 @@ def _render_yoco_exit_tab() -> None:
     )
 
     def _header_row():
-        hcols = st.columns([2, 2, 3, 1, 2])
+        hcols = st.columns([2, 2, 3, 1, 3])
         labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage Q3?", "Last Affinity Contact"]
         for hc, lbl in zip(hcols, labels):
             with hc:
@@ -6055,7 +6088,7 @@ def _render_twinco_exit_tab() -> None:
                 f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
                 unsafe_allow_html=True,
             )
-            cols = st.columns([2, 2, 3, 1, 2])
+            cols = st.columns([2, 2, 3, 1, 3])
             with cols[0]:
                 st.markdown(
                     f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
@@ -6099,9 +6132,11 @@ def _render_twinco_exit_tab() -> None:
                             unsafe_allow_html=True,
                         )
                     else:
+                        _snip = note.get("snippet") or ""
+                        _snip_style = "font-style:italic;" if _snip == "No exit-relevant discussion found." else ""
                         st.markdown(
                             f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
-                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            f"<div style='font-size:11px;color:{MUTED};{_snip_style}'>{_snip}</div>",
                             unsafe_allow_html=True,
                         )
             st.markdown("</div>", unsafe_allow_html=True)
@@ -6177,7 +6212,7 @@ def _render_twinco_exit_tab() -> None:
     )
 
     def _header_row():
-        hcols  = st.columns([2, 2, 3, 1, 2])
+        hcols  = st.columns([2, 2, 3, 1, 3])
         labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage Q3?", "Last Affinity Contact"]
         for hc, lbl in zip(hcols, labels):
             with hc:
@@ -6511,7 +6546,7 @@ def _render_maxsoko_exit_tab() -> None:
                 f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
                 unsafe_allow_html=True,
             )
-            cols = st.columns([2, 2, 3, 1, 2])
+            cols = st.columns([2, 2, 3, 1, 3])
             with cols[0]:
                 st.markdown(
                     f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
@@ -6555,9 +6590,11 @@ def _render_maxsoko_exit_tab() -> None:
                             unsafe_allow_html=True,
                         )
                     else:
+                        _snip = note.get("snippet") or ""
+                        _snip_style = "font-style:italic;" if _snip == "No exit-relevant discussion found." else ""
                         st.markdown(
                             f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
-                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            f"<div style='font-size:11px;color:{MUTED};{_snip_style}'>{_snip}</div>",
                             unsafe_allow_html=True,
                         )
             st.markdown("</div>", unsafe_allow_html=True)
@@ -6568,7 +6605,7 @@ def _render_maxsoko_exit_tab() -> None:
     )
 
     def _header_row():
-        hcols  = st.columns([2, 2, 3, 1, 2])
+        hcols  = st.columns([2, 2, 3, 1, 3])
         labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage?", "Last Affinity Contact"]
         for hc, lbl in zip(hcols, labels):
             with hc:
@@ -7082,7 +7119,7 @@ def _render_khazna_exit_tab() -> None:
                 f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
                 unsafe_allow_html=True,
             )
-            cols = st.columns([2, 2, 3, 1, 2])
+            cols = st.columns([2, 2, 3, 1, 3])
             with cols[0]:
                 st.markdown(
                     f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
@@ -7126,9 +7163,11 @@ def _render_khazna_exit_tab() -> None:
                             unsafe_allow_html=True,
                         )
                     else:
+                        _snip = note.get("snippet") or ""
+                        _snip_style = "font-style:italic;" if _snip == "No exit-relevant discussion found." else ""
                         st.markdown(
                             f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
-                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            f"<div style='font-size:11px;color:{MUTED};{_snip_style}'>{_snip}</div>",
                             unsafe_allow_html=True,
                         )
             st.markdown("</div>", unsafe_allow_html=True)
@@ -7204,7 +7243,7 @@ def _render_khazna_exit_tab() -> None:
     )
 
     def _header_row():
-        hcols  = st.columns([2, 2, 3, 1, 2])
+        hcols  = st.columns([2, 2, 3, 1, 3])
         labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage Q3?", "Last Affinity Contact"]
         for hc, lbl in zip(hcols, labels):
             with hc:
@@ -7512,7 +7551,7 @@ def _render_enza_exit_tab() -> None:
                 f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
                 unsafe_allow_html=True,
             )
-            cols = st.columns([2, 2, 3, 1, 2])
+            cols = st.columns([2, 2, 3, 1, 3])
             with cols[0]:
                 st.markdown(
                     f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
@@ -7556,9 +7595,11 @@ def _render_enza_exit_tab() -> None:
                             unsafe_allow_html=True,
                         )
                     else:
+                        _snip = note.get("snippet") or ""
+                        _snip_style = "font-style:italic;" if _snip == "No exit-relevant discussion found." else ""
                         st.markdown(
                             f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
-                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            f"<div style='font-size:11px;color:{MUTED};{_snip_style}'>{_snip}</div>",
                             unsafe_allow_html=True,
                         )
             st.markdown("</div>", unsafe_allow_html=True)
@@ -7621,7 +7662,7 @@ def _render_enza_exit_tab() -> None:
     )
 
     def _header_row():
-        hcols  = st.columns([2, 2, 3, 1, 2])
+        hcols  = st.columns([2, 2, 3, 1, 3])
         labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage?", "Last Affinity Contact"]
         for hc, lbl in zip(hcols, labels):
             with hc:
@@ -7925,7 +7966,7 @@ def _render_sava_exit_tab() -> None:
                 f"<div style='background:{row_bg};border-radius:6px;padding:6px 4px 2px'>",
                 unsafe_allow_html=True,
             )
-            cols = st.columns([2, 2, 3, 1, 2])
+            cols = st.columns([2, 2, 3, 1, 3])
             with cols[0]:
                 st.markdown(
                     f"<div style='padding-top:6px'><span style='font-weight:700;color:#2C2C2A'>{name}</span>"
@@ -7969,9 +8010,11 @@ def _render_sava_exit_tab() -> None:
                             unsafe_allow_html=True,
                         )
                     else:
+                        _snip = note.get("snippet") or ""
+                        _snip_style = "font-style:italic;" if _snip == "No exit-relevant discussion found." else ""
                         st.markdown(
                             f"<div style='font-size:12px;color:#2E7D32;font-weight:600;padding-top:4px'>{note['date']}</div>"
-                            f"<div style='font-size:11px;color:{MUTED}'>{note['snippet']}</div>",
+                            f"<div style='font-size:11px;color:{MUTED};{_snip_style}'>{_snip}</div>",
                             unsafe_allow_html=True,
                         )
             st.markdown("</div>", unsafe_allow_html=True)
@@ -8048,7 +8091,7 @@ def _render_sava_exit_tab() -> None:
     )
 
     def _header_row():
-        hcols = st.columns([2, 2, 3, 1, 2])
+        hcols = st.columns([2, 2, 3, 1, 3])
         labels = ["Buyer / Fit", "Recent Activity", "Strategic Rationale", "Re-engage?", "Last Affinity Contact"]
         for hc, lbl in zip(hcols, labels):
             with hc:
