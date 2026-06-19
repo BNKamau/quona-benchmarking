@@ -3692,131 +3692,101 @@ def classify_exit_relevant(interactions: list[dict]) -> list[dict]:
 
 # ── Yoco Affinity helper ──────────────────────────────────────────────────────
 
-def fetch_last_affinity_note_for_buyer(
-    buyer_name: str, affinity_api_key: str, company_being_exited: str = ""
-) -> dict | None:
+def fetch_last_affinity_note_for_buyer(buyer_name: str, affinity_api_key: str, company_being_exited: str = "") -> dict | None:
     try:
-        import difflib
-        import requests
-        import anthropic as _anthropic
+        import requests, difflib, json as _json, anthropic as _anthropic
 
         AUTH = ("", affinity_api_key)
         BASE = "https://api.affinity.co"
 
-        # ── Org disambiguation (cached per session) ───────────────────────────
-        _cache_key = f"_affinity_org_id_{buyer_name}"
-        org_id = st.session_state.get(_cache_key, "UNCACHED")
-
-        if org_id == "UNCACHED":
-            r = requests.get(
-                f"{BASE}/organizations", params={"term": buyer_name}, auth=AUTH, timeout=15
-            )
-            r.raise_for_status()
-            orgs = r.json().get("organizations", [])
-
-            if not orgs:
-                st.session_state[_cache_key] = None
-                return None
-
-            # Fuzzy name filter — require ≥ 0.6 similarity
-            def _score(org):
-                return difflib.SequenceMatcher(
-                    None, buyer_name.lower(), org.get("name", "").lower()
-                ).ratio()
-
-            candidates = [(o, _score(o)) for o in orgs]
-            candidates = [(o, s) for o, s in candidates if s >= 0.6]
-            if not candidates:
-                st.session_state[_cache_key] = None
-                return None
-
-            if len(candidates) == 1:
-                org_id = candidates[0][0]["id"]
-            else:
-                # Context-aware Claude disambiguation across top 5
-                top5 = [o for o, _ in candidates[:5]]
-                lines = []
-                for i, org in enumerate(top5):
-                    lines.append(
-                        f"{i}: name={org.get('name', '')}, "
-                        f"domain={org.get('domain', '')}, "
-                        f"description={org.get('description', '')}"
-                    )
-                candidates_text = "\n".join(lines)
-
-                chosen_idx = None
-                try:
-                    anth_key = st.secrets.get("ANTHROPIC_API_KEY", "")
-                    if anth_key:
-                        _client = _anthropic.Anthropic(api_key=anth_key)
-                        _msg = _client.messages.create(
-                            model="claude-haiku-4-5-20251001",
-                            max_tokens=10,
-                            system="You are helping identify the correct organization in a CRM.",
-                            messages=[{
-                                "role": "user",
-                                "content": (
-                                    f"We are looking for the Affinity CRM record for {buyer_name} "
-                                    f"in the context of African fintech venture capital and exit processes. "
-                                    f"Here are the candidate organizations found in Affinity:\n\n"
-                                    f"{candidates_text}\n\n"
-                                    f"Which index best matches {buyer_name} as a financial investor or "
-                                    f"strategic acquirer active in African fintech? "
-                                    f"Reply with only the index number. "
-                                    f"If none are a plausible match, reply with -1."
-                                ),
-                            }],
-                        )
-                        chosen_idx = int(_msg.content[0].text.strip())
-                except Exception:
-                    pass
-
-                if chosen_idx is None:
-                    # Fall back to highest fuzzy score
-                    org_id = max(candidates, key=lambda x: x[1])[0]["id"]
-                elif chosen_idx == -1 or chosen_idx >= len(top5):
-                    st.session_state[_cache_key] = None
-                    return None
-                else:
-                    org_id = top5[chosen_idx]["id"]
-
-            st.session_state[_cache_key] = org_id
-
-        if org_id is None:
+        # ── Step 1: Find the right org using Claude disambiguation ──────────
+        r = requests.get(f"{BASE}/organizations", params={"term": buyer_name}, auth=AUTH, timeout=15)
+        r.raise_for_status()
+        candidates = r.json().get("organizations", [])
+        if not candidates:
             return None
 
-        # ── Collect notes: org-level + person-level ───────────────────────────
-        r = requests.get(
-            f"{BASE}/notes", params={"organization_id": org_id}, auth=AUTH, timeout=15
-        )
-        r.raise_for_status()
-        all_notes = list(r.json().get("notes", []))
+        org_id = None
 
-        r_org = requests.get(f"{BASE}/organizations/{org_id}", auth=AUTH, timeout=15)
-        if r_org.ok:
-            for pid in r_org.json().get("person_ids", [])[:10]:
+        if len(candidates) == 1:
+            org_id = candidates[0]["id"]
+        else:
+            # Build candidate list for Claude to disambiguate
+            cand_lines = []
+            for i, c in enumerate(candidates[:5]):
+                name = c.get("name", "")
+                domain = (c.get("domain") or c.get("domains") or [""])[0] if isinstance(c.get("domains"), list) else c.get("domain", "")
+                desc = (c.get("description") or "")[:120]
+                cand_lines.append(f"{i}: name={name} | domain={domain} | description={desc}")
+
+            cache_key = f"_affinity_org_disambig_{buyer_name}"
+            if cache_key in st.session_state:
+                org_id = st.session_state[cache_key]
+            else:
                 try:
-                    rp = requests.get(
-                        f"{BASE}/notes", params={"person_id": pid}, auth=AUTH, timeout=15
+                    _ac = _anthropic.Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY", ""))
+                    _msg = _ac.messages.create(
+                        model="claude-haiku-4-5",
+                        max_tokens=10,
+                        messages=[{
+                            "role": "user",
+                            "content": (
+                                f"We are looking for the Affinity CRM record for '{buyer_name}' "
+                                f"in the context of African fintech venture capital and exit processes. "
+                                f"Candidates:\n" + "\n".join(cand_lines) +
+                                f"\nWhich index (0-{len(cand_lines)-1}) best matches '{buyer_name}' "
+                                f"as a financial investor or strategic acquirer active in African fintech? "
+                                f"Reply with only the integer index. If none match, reply -1."
+                            )
+                        }]
                     )
-                    if rp.ok:
-                        all_notes.extend(rp.json().get("notes", []))
+                    idx = int(_msg.content[0].text.strip())
+                    org_id = candidates[idx]["id"] if 0 <= idx < len(candidates) else None
                 except Exception:
-                    pass
+                    # Fallback: best fuzzy name match
+                    scored = sorted(
+                        candidates[:5],
+                        key=lambda c: difflib.SequenceMatcher(None, buyer_name.lower(), c.get("name","").lower()).ratio(),
+                        reverse=True
+                    )
+                    best = scored[0]
+                    if difflib.SequenceMatcher(None, buyer_name.lower(), best.get("name","").lower()).ratio() >= 0.6:
+                        org_id = best["id"]
+
+                st.session_state[cache_key] = org_id
+
+        if not org_id:
+            return None
+
+        # ── Step 2: Fetch org-level notes ────────────────────────────────────
+        r = requests.get(f"{BASE}/notes", params={"organization_id": org_id}, auth=AUTH, timeout=15)
+        r.raise_for_status()
+        all_notes = r.json().get("notes", [])
+
+        # ── Step 3: Fetch person-level notes for all persons in this org ─────
+        try:
+            r2 = requests.get(f"{BASE}/organizations/{org_id}", auth=AUTH, timeout=15)
+            person_ids = r2.json().get("person_ids", [])
+            for pid in person_ids[:8]:  # cap at 8 to avoid rate limits
+                rp = requests.get(f"{BASE}/notes", params={"person_id": pid}, auth=AUTH, timeout=10)
+                if rp.ok:
+                    all_notes.extend(rp.json().get("notes", []))
+        except Exception:
+            pass
 
         # Deduplicate by note id
-        seen: set = set()
+        seen_ids = set()
         deduped = []
         for n in all_notes:
             nid = n.get("id")
-            if nid not in seen:
-                seen.add(nid)
+            if nid not in seen_ids:
+                seen_ids.add(nid)
                 deduped.append(n)
 
         if not deduped:
             return None
 
-        # ── Sort and stale check — 90 days ────────────────────────────────────
+        # ── Step 4: Parse dates and sort DESCENDING — most recent first ──────
         def _note_dt(n):
             raw = n.get("created_at", "")
             if not raw:
@@ -3824,97 +3794,89 @@ def fetch_last_affinity_note_for_buyer(
             dt = datetime.fromisoformat(raw)
             return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
-        deduped.sort(key=_note_dt, reverse=True)
-        latest = deduped[0]
-        note_dt = _note_dt(latest)
-        date_str = note_dt.strftime("%Y-%m-%d") if note_dt != datetime.min.replace(tzinfo=timezone.utc) else ""
+        deduped.sort(key=_note_dt, reverse=True)  # newest first
 
-        cutoff = datetime.now(tz=timezone.utc) - timedelta(days=90)
-        if note_dt < cutoff:
+        # ── Step 5: Stale check on the single most recent note ───────────────
+        most_recent_dt = _note_dt(deduped[0])
+        date_str = most_recent_dt.strftime("%Y-%m-%d")
+        cutoff_90 = datetime.now(tz=timezone.utc) - timedelta(days=90)
+        if most_recent_dt < cutoff_90:
             return {"date": date_str, "creator_name": None, "snippet": None, "stale": True}
 
-        # ── Creator name ──────────────────────────────────────────────────────
-        creator_name = "Unknown"
-        creator_id = latest.get("creator_id")
-        if creator_id:
-            try:
-                rp = requests.get(f"{BASE}/persons/{creator_id}", auth=AUTH, timeout=10)
-                p = rp.json()
-                creator_name = (
-                    f"{p.get('first_name', '')} {p.get('last_name', '')}".strip() or "Unknown"
-                )
-            except Exception:
-                pass
-
-        # ── Exit-relevance keyword filter — Pass 1 ───────────────────────────
-        company_ctx = company_being_exited or "the portfolio company"
-        _exit_kws = list(dict.fromkeys(kw for kw in [
+        # ── Step 6: Exit-relevance keyword scoring across all recent notes ────
+        exit_keywords = [
             "acquisition", "acquire", "acquirer", "m&a", "strategic",
             "exit", "secondary", "liquidity", "sell", "sale", "buyer",
             "term sheet", "loi", "due diligence", "valuation", "offer",
             "interest", "mandate", "process", "banker", "transaction",
-            "verto", "yoco", "lulalend", "cowrywise",
-            company_being_exited.lower(),
-        ] if kw))
-
-        def _kw_score(n):
-            body = (n.get("content") or "").lower()
-            return sum(1 for kw in _exit_kws if kw in body)
-
-        # Sort: keyword relevance DESC, then created_at DESC as tiebreaker
-        # (deduped is already sorted by created_at DESC — stable sort preserves order within equal scores)
-        scored_notes = sorted(deduped, key=lambda n: (_kw_score(n), _note_dt(n)), reverse=True)
-        top3 = [
-            (n.get("content") or "").strip()
-            for n in scored_notes[:3]
-            if (n.get("content") or "").strip()
+            "verto", "yoco", "lulalend", "cowrywise", "khazna", "enza",
+            "twinco", "maxsoko", "sava",
         ]
+        if company_being_exited:
+            exit_keywords.append(company_being_exited.lower())
 
-        # ── Claude snippet — Pass 2 ───────────────────────────────────────────
-        _NO_RELEVANT = "No exit-relevant discussion found."
-        snippet = None
+        def _score(n):
+            text = (n.get("content") or "").lower()
+            return sum(1 for kw in exit_keywords if kw in text)
+
+        # Score all notes, sort by (score DESC, date DESC)
+        scored_notes = sorted(deduped, key=lambda n: (_score(n), _note_dt(n).timestamp()), reverse=True)
+
+        # Take top 3 by relevance score; if all score 0, take 3 most recent
+        top_notes = scored_notes[:3]
+
+        # ── Step 7: Claude summarization ─────────────────────────────────────
+        note_texts = []
+        for n in top_notes:
+            content = (n.get("content") or "").strip()
+            dt_str = _note_dt(n).strftime("%Y-%m-%d")
+            note_texts.append(f"[{dt_str}] {content[:800]}")
+
+        combined = "\n---\n".join(note_texts)
+        company_context = company_being_exited or "the portfolio company being exited"
+
+        summary = None
         try:
-            anth_key = st.secrets.get("ANTHROPIC_API_KEY", "")
-            if anth_key and top3:
-                _client = _anthropic.Anthropic(api_key=anth_key)
-                notes_block = "\n---\n".join(top3)
-                _msg = _client.messages.create(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=60,
-                    system="You are a VC associate summarizing CRM notes. Be concise and specific.",
-                    messages=[{
-                        "role": "user",
-                        "content": (
-                            f"The following are recent Affinity notes related to {buyer_name} "
-                            f"in the context of a potential acquisition of {company_ctx} (a B2B fintech).\n\n"
-                            f"Notes:\n{notes_block}\n\n"
-                            f"Write a single sentence (max 25 words) summarizing: who spoke to whom, "
-                            f"what was discussed as it relates to the acquisition, and what the next step is. "
-                            f"If none of these notes discuss an acquisition, investment, or exit relating to "
-                            f"{company_ctx}, respond with exactly: '{_NO_RELEVANT}' "
-                            f"Do not summarize unrelated content about LP fundraising, portfolio construction, "
-                            f"or general market commentary."
-                        ),
-                    }],
-                )
-                snippet = _msg.content[0].text.strip()
+            _ac = _anthropic.Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY", ""))
+            _msg = _ac.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=80,
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        f"You are a VC associate reviewing CRM notes about '{buyer_name}' "
+                        f"in the context of a potential acquisition of {company_context}, "
+                        f"a B2B fintech company.\n\n"
+                        f"Notes:\n{combined}\n\n"
+                        f"Write ONE sentence (max 25 words) summarizing what was discussed "
+                        f"specifically relating to an acquisition, investment, or exit of "
+                        f"{company_context}. Include who spoke to whom if mentioned.\n"
+                        f"If none of these notes discuss an acquisition, exit, or investment "
+                        f"relating to {company_context}, respond with exactly: "
+                        f"'No exit-relevant discussion found.'\n"
+                        f"Do not summarize LP fundraising, portfolio construction, or "
+                        f"general market commentary."
+                    )
+                }]
+            )
+            summary = _msg.content[0].text.strip()
         except Exception:
-            pass
+            # Fallback: first 150 chars of most recent note ending at word boundary
+            fallback_content = (top_notes[0].get("content") or "").strip()
+            if len(fallback_content) > 150:
+                fallback_content = fallback_content[:150].rsplit(" ", 1)[0] + "…"
+            summary = fallback_content
 
-        if not snippet:
-            raw = (deduped[0].get("content") or "").strip()
-            if len(raw) > 180:
-                raw = raw[:180]
-                cut = raw.rfind(" ")
-                raw = raw[:cut] if cut > 0 else raw
-            snippet = raw or "Note found — no content available"
+        if not summary:
+            summary = "No exit-relevant discussion found."
 
         return {
             "date":         date_str,
-            "creator_name": creator_name,
-            "snippet":      snippet,
+            "creator_name": None,
+            "snippet":      summary,
             "stale":        False,
         }
+
     except Exception:
         return None
 
@@ -4473,7 +4435,7 @@ def _render_cowrywise_exit_tab() -> None:
             ))
             with st.spinner("Fetching Affinity data for all buyers…"):
                 st.session_state["cowrywise_affinity_data"] = {
-                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key, "Cowrywise")
                     for bname in all_names
                 }
             st.rerun()
@@ -4928,7 +4890,7 @@ def _render_vertofx_exit_tab() -> None:
             ))
             with st.spinner("Fetching Affinity data for all buyers…"):
                 st.session_state["vertofx_affinity_data"] = {
-                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key, "VertoFX")
                     for bname in all_names
                 }
             st.rerun()
@@ -5352,7 +5314,7 @@ def _render_lulalend_exit_tab() -> None:
             ))
             with st.spinner("Fetching Affinity data for all buyers…"):
                 st.session_state["lulalend_affinity_data"] = {
-                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key, "Lulalend")
                     for bname in all_names
                 }
             st.rerun()
@@ -5751,7 +5713,7 @@ def _render_yoco_exit_tab() -> None:
             ))
             with st.spinner("Fetching Affinity data for all buyers…"):
                 st.session_state["yoco_affinity_data"] = {
-                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key, "Yoco")
                     for bname in all_names
                 }
             st.rerun()
@@ -6201,7 +6163,7 @@ def _render_twinco_exit_tab() -> None:
             ))
             with st.spinner("Fetching Affinity data for all buyers…"):
                 st.session_state["twinco_affinity_data"] = {
-                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key, "Twinco")
                     for bname in all_names
                 }
             st.rerun()
@@ -6666,7 +6628,7 @@ def _render_maxsoko_exit_tab() -> None:
             ))
             with st.spinner("Fetching Affinity data for all buyers…"):
                 st.session_state["maxsoko_affinity_data"] = {
-                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key, "MaxSoko")
                     for bname in all_names
                 }
             st.rerun()
@@ -7232,7 +7194,7 @@ def _render_khazna_exit_tab() -> None:
             ))
             with st.spinner("Fetching Affinity data for all buyers…"):
                 st.session_state["khazna_affinity_data"] = {
-                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key, "Khazna")
                     for bname in all_names
                 }
             st.rerun()
@@ -7651,7 +7613,7 @@ def _render_enza_exit_tab() -> None:
             ))
             with st.spinner("Fetching Affinity data for all buyers…"):
                 st.session_state["enza_affinity_data"] = {
-                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key, "Enza")
                     for bname in all_names
                 }
             st.rerun()
@@ -8080,7 +8042,7 @@ def _render_sava_exit_tab() -> None:
             _api_key = st.secrets.get("AFFINITY_API_KEY", "")
             with st.spinner("Fetching Affinity data for all buyers…"):
                 st.session_state["sava_affinity_data"] = {
-                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key)
+                    bname: fetch_last_affinity_note_for_buyer(bname, _api_key, "Sava")
                     for bname in all_buyer_names
                 }
             st.rerun()
