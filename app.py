@@ -3816,7 +3816,7 @@ def fetch_last_affinity_note_for_buyer(
         if not deduped:
             return None
 
-        # ── Sort and stale check — 180 days ───────────────────────────────────
+        # ── Sort and stale check — 90 days ────────────────────────────────────
         def _note_dt(n):
             raw = n.get("created_at", "")
             if not raw:
@@ -3829,7 +3829,7 @@ def fetch_last_affinity_note_for_buyer(
         note_dt = _note_dt(latest)
         date_str = note_dt.strftime("%Y-%m-%d") if note_dt != datetime.min.replace(tzinfo=timezone.utc) else ""
 
-        cutoff = datetime.now(tz=timezone.utc) - timedelta(days=180)
+        cutoff = datetime.now(tz=timezone.utc) - timedelta(days=90)
         if note_dt < cutoff:
             return {"date": date_str, "creator_name": None, "snippet": None, "stale": True}
 
@@ -4372,7 +4372,7 @@ def _render_cowrywise_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -4842,7 +4842,7 @@ def _render_vertofx_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -5289,7 +5289,7 @@ def _render_lulalend_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -5658,7 +5658,7 @@ def _render_yoco_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -6127,7 +6127,7 @@ def _render_twinco_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -6585,7 +6585,7 @@ def _render_maxsoko_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -7158,7 +7158,7 @@ def _render_khazna_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -7590,7 +7590,7 @@ def _render_enza_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -8005,7 +8005,7 @@ def _render_sava_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
