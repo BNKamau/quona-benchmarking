@@ -3273,15 +3273,15 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
 
         # Fund folder mapping — which portfolio companies folder each company belongs to
         FUND_MAP = {
-            "Verto":      "54633680859",   # 02 AQF Portfolio Companies
-            "Yoco":       "54633680859",
-            "Cowrywise":  "54633680859",
-            "Lulalend":   "54633680859",
-            "Khazna":     "54633680859",
-            "Enza":       "54633680859",
-            "TWINCO":     "54633680859",
-            "MaxSoko":    "54633680859",
-            "SAVA":       "54633680859",
+            "Verto":      "54633680859",    # 02 AQF Portfolio Companies (Fund II)
+            "Lulalend":   "54633680859",    # 02 AQF Portfolio Companies (Fund II)
+            "Cowrywise":  "54633680859",    # 02 AQF Portfolio Companies (Fund II)
+            "MaxSoko":    "54633680859",    # 02 AQF Portfolio Companies (Fund II)
+            "Yoco":       "3998199207",     # 01 AFIF Portfolio Companies (Fund I)
+            "Khazna":     "136720620453",   # 04 Fund III Portfolio Companies
+            "SAVA":       "136720620453",   # 04 Fund III Portfolio Companies
+            "TWINCO":     "136720620453",   # 04 Fund III Portfolio Companies
+            "Enza":       "136720620453",   # 04 Fund III Portfolio Companies
         }
 
         portfolio_folder_id = FUND_MAP.get(company_name)
@@ -3299,26 +3299,64 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
         if not company_folder:
             return None, None
 
-        # Step 2: Find "02 Management Accounts" folder
+        # Step 2: Find management accounts folder — fuzzy keyword scoring
         sub_items = client.folders.get_folder_items(company_folder.id, limit=200).entries
-        mgmt_folder = next(
-            (i for i in sub_items
-             if i.type.value == "folder"
-             and "management account" in i.name.lower()),
-            None
-        )
+        _mgmt_kws = [
+            "management account", "financial statement", "monthly financial",
+            "financials", "kpi", "reporting", "accounts", "monthly report",
+            "board report",
+        ]
+
+        def _mgmt_score(folder):
+            n = folder.name.lower()
+            return sum(1 for kw in _mgmt_kws if kw in n)
+
+        folder_candidates = [i for i in sub_items if i.type.value == "folder"]
+        scored = sorted(folder_candidates, key=_mgmt_score, reverse=True)
+        if scored and _mgmt_score(scored[0]) > 0:
+            mgmt_folder = scored[0]
+        else:
+            # All score 0 — ask Claude to pick
+            mgmt_folder = None
+            try:
+                import anthropic as _anthropic
+                _lines = "\n".join(
+                    f"{i}: {f.name}" for i, f in enumerate(folder_candidates[:10])
+                )
+                _ac = _anthropic.Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY", ""))
+                _msg = _ac.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=5,
+                    messages=[{
+                        "role": "user",
+                        "content": (
+                            f"Which folder index most likely contains monthly KPI or "
+                            f"financial reports for a portfolio company? "
+                            f"Reply with only the integer index.\n{_lines}"
+                        ),
+                    }],
+                )
+                _idx = int(_msg.content[0].text.strip())
+                if 0 <= _idx < len(folder_candidates):
+                    mgmt_folder = folder_candidates[_idx]
+            except Exception:
+                pass
         if not mgmt_folder:
             return None, None
 
-        # Step 3: Find most recent year folder (named as plain year e.g. "2026")
+        # Step 3: Find most recent year folder — handles "2026", "FY2026", "FY 2026"
+        import re as _re
         year_items = client.folders.get_folder_items(mgmt_folder.id, limit=200).entries
-        year_folders = [
-            i for i in year_items
-            if i.type.value == "folder" and i.name.strip().isdigit()
-        ]
+        year_folders = []
+        for f in year_items:
+            if f.type.value != "folder":
+                continue
+            m = _re.search(r'20\d{2}', f.name)
+            if m:
+                year_folders.append((f, int(m.group())))
         if not year_folders:
             return None, None
-        latest_year = sorted(year_folders, key=lambda f: int(f.name.strip()), reverse=True)[0]
+        latest_year = sorted(year_folders, key=lambda x: x[1], reverse=True)[0][0]
 
         # Step 4: Find most recent month folder (named e.g. "03 2026", "01 2026")
         month_items = client.folders.get_folder_items(latest_year.id, limit=200).entries
