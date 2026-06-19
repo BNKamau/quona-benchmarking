@@ -3399,7 +3399,6 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
         if not year_folders:
             return None, None
         latest_year = sorted(year_folders, key=lambda x: x[1], reverse=True)[0][0]
-        st.write(f"DEBUG year: [{latest_year.id}] {latest_year.name!r}")
 
         # Step 4: Find most recent month folder (named e.g. "03 2026", "01 2026")
         month_items = client.folders.get_folder_items(latest_year.id, limit=200).entries
@@ -3413,6 +3412,7 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
             if not xlsx_files:
                 return None, None
             target_file = xlsx_files[0]
+            latest_month = None
         else:
             def _month_sort(f):
                 try:
@@ -3420,7 +3420,6 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
                 except Exception:
                     return 0
             latest_month = sorted(month_folders, key=_month_sort, reverse=True)[0]
-            st.write(f"DEBUG month: [{latest_month.id}] {latest_month.name!r}")
 
             # Step 5: Find most recent xlsx in month folder
             file_items = client.folders.get_folder_items(latest_month.id, limit=200).entries
@@ -3431,7 +3430,12 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
             if not xlsx_files:
                 return None, None
             target_file = xlsx_files[0]
-        st.write(f"DEBUG file: [{target_file.id}] {target_file.name!r}")
+
+        st.session_state["box_debug"] = {
+            "year":  latest_year.name,
+            "month": latest_month.name if latest_month else "no month subfolder",
+            "file":  target_file.name,
+        }
 
         # Step 6: Download file content as bytes
         import io
@@ -3488,6 +3492,10 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
                 unsafe_allow_html=True,
             )
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+    if "box_debug" in st.session_state:
+        d = st.session_state["box_debug"]
+        st.info(f"Box pulled: year={d['year']} | month={d['month']} | file={d['file']}")
 
     uploaded = st.file_uploader(
         "Select Excel file",
