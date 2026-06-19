@@ -3692,25 +3692,131 @@ def classify_exit_relevant(interactions: list[dict]) -> list[dict]:
 
 # ── Yoco Affinity helper ──────────────────────────────────────────────────────
 
-def fetch_last_affinity_note_for_buyer(buyer_name: str, affinity_api_key: str) -> dict | None:
+def fetch_last_affinity_note_for_buyer(
+    buyer_name: str, affinity_api_key: str, company_being_exited: str = ""
+) -> dict | None:
     try:
+        import difflib
         import requests
+        import anthropic as _anthropic
+
         AUTH = ("", affinity_api_key)
         BASE = "https://api.affinity.co"
 
-        r = requests.get(f"{BASE}/organizations", params={"term": buyer_name}, auth=AUTH, timeout=15)
-        r.raise_for_status()
-        orgs = r.json().get("organizations", [])
-        if not orgs:
-            return None
-        org_id = orgs[0]["id"]
+        # ── Org disambiguation (cached per session) ───────────────────────────
+        _cache_key = f"_affinity_org_id_{buyer_name}"
+        org_id = st.session_state.get(_cache_key, "UNCACHED")
 
-        r = requests.get(f"{BASE}/notes", params={"organization_id": org_id}, auth=AUTH, timeout=15)
-        r.raise_for_status()
-        notes = r.json().get("notes", [])
-        if not notes:
+        if org_id == "UNCACHED":
+            r = requests.get(
+                f"{BASE}/organizations", params={"term": buyer_name}, auth=AUTH, timeout=15
+            )
+            r.raise_for_status()
+            orgs = r.json().get("organizations", [])
+
+            if not orgs:
+                st.session_state[_cache_key] = None
+                return None
+
+            # Fuzzy name filter — require ≥ 0.6 similarity
+            def _score(org):
+                return difflib.SequenceMatcher(
+                    None, buyer_name.lower(), org.get("name", "").lower()
+                ).ratio()
+
+            candidates = [(o, _score(o)) for o in orgs]
+            candidates = [(o, s) for o, s in candidates if s >= 0.6]
+            if not candidates:
+                st.session_state[_cache_key] = None
+                return None
+
+            if len(candidates) == 1:
+                org_id = candidates[0][0]["id"]
+            else:
+                # Context-aware Claude disambiguation across top 5
+                top5 = [o for o, _ in candidates[:5]]
+                lines = []
+                for i, org in enumerate(top5):
+                    lines.append(
+                        f"{i}: name={org.get('name', '')}, "
+                        f"domain={org.get('domain', '')}, "
+                        f"description={org.get('description', '')}"
+                    )
+                candidates_text = "\n".join(lines)
+
+                chosen_idx = None
+                try:
+                    anth_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+                    if anth_key:
+                        _client = _anthropic.Anthropic(api_key=anth_key)
+                        _msg = _client.messages.create(
+                            model="claude-haiku-4-5-20251001",
+                            max_tokens=10,
+                            system="You are helping identify the correct organization in a CRM.",
+                            messages=[{
+                                "role": "user",
+                                "content": (
+                                    f"We are looking for the Affinity CRM record for {buyer_name} "
+                                    f"in the context of African fintech venture capital and exit processes. "
+                                    f"Here are the candidate organizations found in Affinity:\n\n"
+                                    f"{candidates_text}\n\n"
+                                    f"Which index best matches {buyer_name} as a financial investor or "
+                                    f"strategic acquirer active in African fintech? "
+                                    f"Reply with only the index number. "
+                                    f"If none are a plausible match, reply with -1."
+                                ),
+                            }],
+                        )
+                        chosen_idx = int(_msg.content[0].text.strip())
+                except Exception:
+                    pass
+
+                if chosen_idx is None:
+                    # Fall back to highest fuzzy score
+                    org_id = max(candidates, key=lambda x: x[1])[0]["id"]
+                elif chosen_idx == -1 or chosen_idx >= len(top5):
+                    st.session_state[_cache_key] = None
+                    return None
+                else:
+                    org_id = top5[chosen_idx]["id"]
+
+            st.session_state[_cache_key] = org_id
+
+        if org_id is None:
             return None
 
+        # ── Collect notes: org-level + person-level ───────────────────────────
+        r = requests.get(
+            f"{BASE}/notes", params={"organization_id": org_id}, auth=AUTH, timeout=15
+        )
+        r.raise_for_status()
+        all_notes = list(r.json().get("notes", []))
+
+        r_org = requests.get(f"{BASE}/organizations/{org_id}", auth=AUTH, timeout=15)
+        if r_org.ok:
+            for pid in r_org.json().get("person_ids", [])[:10]:
+                try:
+                    rp = requests.get(
+                        f"{BASE}/notes", params={"person_id": pid}, auth=AUTH, timeout=15
+                    )
+                    if rp.ok:
+                        all_notes.extend(rp.json().get("notes", []))
+                except Exception:
+                    pass
+
+        # Deduplicate by note id
+        seen: set = set()
+        deduped = []
+        for n in all_notes:
+            nid = n.get("id")
+            if nid not in seen:
+                seen.add(nid)
+                deduped.append(n)
+
+        if not deduped:
+            return None
+
+        # ── Sort and stale check — 180 days ───────────────────────────────────
         def _note_dt(n):
             raw = n.get("created_at", "")
             if not raw:
@@ -3718,43 +3824,70 @@ def fetch_last_affinity_note_for_buyer(buyer_name: str, affinity_api_key: str) -
             dt = datetime.fromisoformat(raw)
             return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
-        notes.sort(key=_note_dt, reverse=True)
-        latest = notes[0]
-
-        raw_date = latest.get("created_at", "")
+        deduped.sort(key=_note_dt, reverse=True)
+        latest = deduped[0]
         note_dt = _note_dt(latest)
         date_str = note_dt.strftime("%Y-%m-%d") if note_dt != datetime.min.replace(tzinfo=timezone.utc) else ""
 
-        cutoff = datetime.now(tz=timezone.utc) - timedelta(days=90)
+        cutoff = datetime.now(tz=timezone.utc) - timedelta(days=180)
         if note_dt < cutoff:
             return {"date": date_str, "creator_name": None, "snippet": None, "stale": True}
 
+        # ── Creator name ──────────────────────────────────────────────────────
         creator_name = "Unknown"
         creator_id = latest.get("creator_id")
         if creator_id:
             try:
                 rp = requests.get(f"{BASE}/persons/{creator_id}", auth=AUTH, timeout=10)
                 p = rp.json()
-                creator_name = (f"{p.get('first_name', '')} {p.get('last_name', '')}".strip() or "Unknown")
+                creator_name = (
+                    f"{p.get('first_name', '')} {p.get('last_name', '')}".strip() or "Unknown"
+                )
             except Exception:
                 pass
 
-        content = (latest.get("content") or "").strip()
-        keywords = {"yoco", "exit", "acquisition", "strategic", "partnership", buyer_name.lower()}
-        relevant = [
-            s.strip() for s in content.replace("\n", " ").split(".")
-            if s.strip() and any(kw in s.lower() for kw in keywords)
+        # ── Claude-generated snippet ──────────────────────────────────────────
+        top3 = [
+            (n.get("content") or "").strip()
+            for n in deduped[:3]
+            if (n.get("content") or "").strip()
         ]
-        if relevant:
-            summary = ". ".join(relevant[:2]) + "."
-            summary = summary[:200] + ("…" if len(summary) > 200 else "")
-        else:
-            summary = "Note found — no exit-relevant content"
+        snippet = None
+        try:
+            anth_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+            if anth_key and top3:
+                _client = _anthropic.Anthropic(api_key=anth_key)
+                company_ctx = company_being_exited or "the portfolio company"
+                notes_block = "\n---\n".join(top3)
+                _msg = _client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=60,
+                    system="You are a VC associate summarizing CRM notes. Be concise and specific.",
+                    messages=[{
+                        "role": "user",
+                        "content": (
+                            f"The following are recent Affinity notes related to {buyer_name} "
+                            f"in the context of a potential acquisition of {company_ctx} (a B2B fintech).\n\n"
+                            f"Notes:\n{notes_block}\n\n"
+                            f"Write a single sentence (max 25 words) summarizing: who spoke to whom, "
+                            f"what was discussed as it relates to the acquisition, and what the next step is. "
+                            f"If the notes are not related to an acquisition discussion, say "
+                            f"'No exit-relevant discussion found in recent notes.' "
+                            f"Do not mention fundraising, LP relations, or topics unrelated to M&A."
+                        ),
+                    }],
+                )
+                snippet = _msg.content[0].text.strip()
+        except Exception:
+            pass
+
+        if not snippet:
+            snippet = (deduped[0].get("content") or "").strip()[:120] or "Note found — no content available"
 
         return {
             "date":         date_str,
             "creator_name": creator_name,
-            "snippet":      summary,
+            "snippet":      snippet,
             "stale":        False,
         }
     except Exception:
@@ -4214,7 +4347,7 @@ def _render_cowrywise_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -4682,7 +4815,7 @@ def _render_vertofx_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -5127,7 +5260,7 @@ def _render_lulalend_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -5494,7 +5627,7 @@ def _render_yoco_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -5961,7 +6094,7 @@ def _render_twinco_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -6417,7 +6550,7 @@ def _render_maxsoko_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -6988,7 +7121,7 @@ def _render_khazna_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -7418,7 +7551,7 @@ def _render_enza_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
@@ -7831,7 +7964,7 @@ def _render_sava_exit_tab() -> None:
                         )
                     elif note.get("stale"):
                         st.markdown(
-                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 90 days</div>"
+                            f"<div style='font-size:11px;color:#E65100;font-weight:600;padding-top:4px'>No update in 180 days</div>"
                             f"<div style='font-size:11px;color:{MUTED}'>Last contact: {note['date']}</div>",
                             unsafe_allow_html=True,
                         )
