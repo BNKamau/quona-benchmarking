@@ -3285,17 +3285,22 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
         }
 
         portfolio_folder_id = FUND_MAP.get(company_name)
+        st.write(f"DEBUG step 0: company_name={company_name!r}, portfolio_folder_id={portfolio_folder_id!r}")
         if not portfolio_folder_id:
+            st.write("DEBUG: no portfolio folder id in FUND_MAP — returning None")
             return None, None
 
         # Step 1: Find company folder inside Portfolio Companies
         items = client.folders.get_folder_items(portfolio_folder_id, limit=200).entries
+        folder_names = [i.name for i in items if i.type.value == "folder"]
+        st.write(f"DEBUG step 1: found {len(folder_names)} folders in portfolio folder: {folder_names}")
         company_folder = next(
             (i for i in items
              if i.type.value == "folder"
              and company_name.lower() in i.name.lower()),
             None
         )
+        st.write(f"DEBUG step 1 match: {company_folder.name if company_folder else 'NO MATCH'}")
         if not company_folder:
             return None, None
 
@@ -3312,10 +3317,14 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
             return sum(1 for kw in _mgmt_kws if kw in n)
 
         folder_candidates = [i for i in sub_items if i.type.value == "folder"]
+        st.write(f"DEBUG step 2: subfolders in company folder: {[f.name for f in folder_candidates]}")
         scored = sorted(folder_candidates, key=_mgmt_score, reverse=True)
+        st.write(f"DEBUG step 2 scores: {[(f.name, _mgmt_score(f)) for f in scored[:5]]}")
         if scored and _mgmt_score(scored[0]) > 0:
             mgmt_folder = scored[0]
+            st.write(f"DEBUG step 2 match: {mgmt_folder.name} (score={_mgmt_score(mgmt_folder)})")
         else:
+            st.write("DEBUG step 2: all scores 0 — falling back to Claude")
             # All score 0 — ask Claude to pick
             mgmt_folder = None
             try:
@@ -3339,14 +3348,18 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
                 _idx = int(_msg.content[0].text.strip())
                 if 0 <= _idx < len(folder_candidates):
                     mgmt_folder = folder_candidates[_idx]
-            except Exception:
-                pass
+                    st.write(f"DEBUG step 2 Claude pick: index={_idx} → {mgmt_folder.name}")
+            except Exception as _ce:
+                st.write(f"DEBUG step 2 Claude failed: {_ce}")
         if not mgmt_folder:
+            st.write("DEBUG: no mgmt folder found — returning None")
             return None, None
 
         # Step 3: Find most recent year folder — handles "2026", "FY2026", "FY 2026"
         import re as _re
         year_items = client.folders.get_folder_items(mgmt_folder.id, limit=200).entries
+        all_year_names = [f.name for f in year_items if f.type.value == "folder"]
+        st.write(f"DEBUG step 3: folders inside mgmt folder: {all_year_names}")
         year_folders = []
         for f in year_items:
             if f.type.value != "folder":
@@ -3354,20 +3367,26 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
             m = _re.search(r'20\d{2}', f.name)
             if m:
                 year_folders.append((f, int(m.group())))
+        st.write(f"DEBUG step 3 year matches: {[(f.name, yr) for f, yr in year_folders]}")
         if not year_folders:
+            st.write("DEBUG: no year folders found — returning None")
             return None, None
         latest_year = sorted(year_folders, key=lambda x: x[1], reverse=True)[0][0]
+        st.write(f"DEBUG step 3 latest year: {latest_year.name}")
 
         # Step 4: Find most recent month folder (named e.g. "03 2026", "01 2026")
         month_items = client.folders.get_folder_items(latest_year.id, limit=200).entries
         month_folders = [i for i in month_items if i.type.value == "folder"]
+        st.write(f"DEBUG step 4: month folders: {[f.name for f in month_folders]}")
         if not month_folders:
             # No month subfolders — look for xlsx directly in year folder
             xlsx_files = [
                 i for i in month_items
                 if i.type.value == "file" and i.name.lower().endswith(".xlsx")
             ]
+            st.write(f"DEBUG step 4: no month folders, xlsx directly in year folder: {[f.name for f in xlsx_files]}")
             if not xlsx_files:
+                st.write("DEBUG: no xlsx files found — returning None")
                 return None, None
             target_file = xlsx_files[0]
         else:
@@ -3377,6 +3396,7 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
                 except Exception:
                     return 0
             latest_month = sorted(month_folders, key=_month_sort, reverse=True)[0]
+            st.write(f"DEBUG step 4 latest month: {latest_month.name}")
 
             # Step 5: Find most recent xlsx in month folder
             file_items = client.folders.get_folder_items(latest_month.id, limit=200).entries
@@ -3384,11 +3404,14 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
                 i for i in file_items
                 if i.type.value == "file" and i.name.lower().endswith(".xlsx")
             ]
+            st.write(f"DEBUG step 5: xlsx files in month folder: {[f.name for f in xlsx_files]}")
             if not xlsx_files:
+                st.write("DEBUG: no xlsx files in month folder — returning None")
                 return None, None
             target_file = xlsx_files[0]
 
         # Step 6: Download file content as bytes
+        st.write(f"DEBUG step 6: downloading {target_file.name} [{target_file.id}]")
         import io
         buffer = io.BytesIO()
         client.downloads.download_file(target_file.id, destination_file=buffer)
@@ -3397,6 +3420,8 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
 
     except Exception as e:
         st.warning(f"Box sync error: {e}")
+        import traceback
+        st.write(f"DEBUG exception: {traceback.format_exc()}")
         return None, None
 
 
