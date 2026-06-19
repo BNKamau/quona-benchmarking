@@ -4452,7 +4452,7 @@ def _render_vertofx_exit_tab() -> None:
         ),
         (
             "Strategic Sale to Global PSP",
-            ["$100–250M", "4–8x revenue"],
+            ["$150–220M", "Comp median implies ~$362M at 5.8x revenue — treat as ceiling, not base"],
             "Acquisition by a global payments infrastructure player seeking Africa and EM corridor access — most realistic path given consolidation in B2B FX",
             [GREEN_DOT, GREEN_DOT, GREEN_DOT], "Most likely — 24–36 months", True,
         ),
@@ -4600,6 +4600,15 @@ def _render_vertofx_exit_tab() -> None:
         f"Corpay acquisition of GPS Capital Markets (B2B FX, 2024), "
         f"and Paystack–Stripe ($200M+, 2020)."
         f"</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "<div style='font-size:11px;color:#93A3A1;padding:8px;background:#EFF0EA;"
+        "border-radius:6px;margin-top:12px'>"
+        "Comp-median multiples reflect peak exit conditions. Base case assumes a strategic "
+        "sale at a discount to comp median given current market conditions and single-buyer "
+        "dynamics. Use $150–220M as the working base for LP reporting."
+        "</div>",
         unsafe_allow_html=True,
     )
 
