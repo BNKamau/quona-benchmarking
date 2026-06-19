@@ -3251,27 +3251,95 @@ def _build_preview_df(rows: list[dict]) -> pd.DataFrame:
     return df.loc[:, (df != "—").any(axis=0)]
 
 
-def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[None, None]:
+def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str, str] | tuple[None, None, None]:
     """
-    Navigate Box folder structure to find the most recent KPI xlsx for a company.
+    Navigate Box folder structure to find the most recent KPI file for a company.
 
-    Path: Root → Fund folder → Portfolio Companies folder → Company folder
-          → Management Accounts → most recent year folder
-          → most recent month folder → most recent .xlsx file
+    Searches both the Management Accounts folder and Board Meetings folder,
+    collects xlsx and pdf files, and returns the single most recently
+    modified file across both sources.
 
-    Returns (file_bytes, filename) or (None, None) if not found.
+    Returns (file_bytes, filename, file_type) where file_type is "xlsx" or "pdf",
+    or (None, None, None) if not found.
     """
     import re as _re
+    import io
 
     def _strip_prefix(name: str) -> str:
         return _re.sub(r'^\d+\s*', '', name).lower()
+
+    def _score_folder(folder, keywords):
+        n = folder.name.lower()
+        return sum(1 for kw in keywords if kw in n)
+
+    def _collect_files_from_source(source_folder):
+        """Navigate year → month inside source_folder, collect xlsx/pdf files."""
+        collected = []
+        year_items = client.folders.get_folder_items(source_folder.id, limit=200).entries
+        year_folders = []
+        for f in year_items:
+            if f.type.value != "folder":
+                continue
+            m = _re.search(r'20\d{2}', f.name)
+            if m:
+                year_folders.append((f, int(m.group())))
+
+        if not year_folders:
+            # No year subfolders — try files directly in the source folder
+            for f in year_items:
+                if f.type.value != "file":
+                    continue
+                nl = f.name.lower()
+                if nl.endswith(".xlsx"):
+                    collected.append({"id": f.id, "name": f.name,
+                                      "modified_at": getattr(f, "modified_at", ""),
+                                      "file_type": "xlsx"})
+                elif nl.endswith(".pdf"):
+                    collected.append({"id": f.id, "name": f.name,
+                                      "modified_at": getattr(f, "modified_at", ""),
+                                      "file_type": "pdf"})
+            return collected
+
+        # Iterate over all year folders, most recent first
+        for year_folder, _ in sorted(year_folders, key=lambda x: x[1], reverse=True):
+            month_items = client.folders.get_folder_items(year_folder.id, limit=200).entries
+            month_folders = [i for i in month_items if i.type.value == "folder"]
+
+            if not month_folders:
+                # Files directly in year folder
+                candidates = month_items
+            else:
+                def _month_sort(f):
+                    try:
+                        return int(f.name.strip().split()[0])
+                    except Exception:
+                        return 0
+                latest_month = sorted(month_folders, key=_month_sort, reverse=True)[0]
+                candidates = client.folders.get_folder_items(latest_month.id, limit=200).entries
+
+            for f in candidates:
+                if f.type.value != "file":
+                    continue
+                nl = f.name.lower()
+                if nl.endswith(".xlsx"):
+                    collected.append({"id": f.id, "name": f.name,
+                                      "modified_at": getattr(f, "modified_at", ""),
+                                      "file_type": "xlsx"})
+                elif nl.endswith(".pdf"):
+                    collected.append({"id": f.id, "name": f.name,
+                                      "modified_at": getattr(f, "modified_at", ""),
+                                      "file_type": "pdf"})
+            if collected:
+                break  # stop at first year that has files
+
+        return collected
 
     try:
         from box_sdk_gen import BoxClient, BoxDeveloperTokenAuth
 
         token = st.secrets.get("BOX_DEV_TOKEN", "")
         if not token:
-            return None, None
+            return None, None, None
 
         auth   = BoxDeveloperTokenAuth(token=token)
         client = BoxClient(auth)
@@ -3298,11 +3366,10 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
                     portfolio_folder_id = fid
                     break
         if not portfolio_folder_id:
-            return None, None
+            return None, None, None
 
         # Step 1: Find company folder inside Portfolio Companies
         # Box folders have numeric prefixes (e.g. "21 Verto", "04 Lulalend")
-        # Strip leading digits+spaces before comparing, match in both directions
         items = client.folders.get_folder_items(portfolio_folder_id, limit=200).entries
         cn_lower = company_name.lower()
         company_folder = None
@@ -3340,32 +3407,28 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
             except Exception:
                 pass
         if not company_folder:
-            return None, None
+            return None, None, None
 
-        # Step 2: Find management accounts folder — fuzzy keyword scoring
+        # Step 2: Find both Management Accounts and Board Meetings folders
         sub_items = client.folders.get_folder_items(company_folder.id, limit=200).entries
-        _mgmt_kws = [
+        sub_folders = [i for i in sub_items if i.type.value == "folder"]
+
+        MGMT_KEYWORDS  = [
             "management account", "financial statement", "monthly financial",
             "financials", "kpi", "reporting", "accounts", "monthly report",
-            "board report",
         ]
+        BOARD_KEYWORDS = ["board meeting", "board pack", "board deck", "board materials", "board"]
 
-        def _mgmt_score(folder):
-            n = folder.name.lower()
-            return sum(1 for kw in _mgmt_kws if kw in n)
+        source_folders = []
+        for sf in sub_folders:
+            if _score_folder(sf, MGMT_KEYWORDS) > 0 or _score_folder(sf, BOARD_KEYWORDS) > 0:
+                source_folders.append(sf)
 
-        sub_folders = [i for i in sub_items if i.type.value == "folder"]
-        scored = sorted(sub_folders, key=_mgmt_score, reverse=True)
-        if scored and _mgmt_score(scored[0]) > 0:
-            mgmt_folder = scored[0]
-        else:
-            # All score 0 — ask Claude to pick
-            mgmt_folder = None
+        # If nothing matched keywords, fall back to Claude picking the best single folder
+        if not source_folders:
             try:
                 import anthropic as _anthropic
-                _lines = "\n".join(
-                    f"{i}: {f.name}" for i, f in enumerate(sub_folders[:10])
-                )
+                _lines = "\n".join(f"{i}: {f.name}" for i, f in enumerate(sub_folders[:10]))
                 _ac = _anthropic.Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY", ""))
                 _msg = _ac.messages.create(
                     model="claude-haiku-4-5-20251001",
@@ -3373,67 +3436,34 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
                     messages=[{
                         "role": "user",
                         "content": (
-                            f"Which folder index most likely contains monthly KPI or "
-                            f"financial reports for a portfolio company? "
+                            "Which folder index most likely contains monthly KPI or "
+                            "financial reports for a portfolio company? "
                             f"Reply with only the integer index.\n{_lines}"
                         ),
                     }],
                 )
                 _idx = int(_msg.content[0].text.strip())
                 if 0 <= _idx < len(sub_folders):
-                    mgmt_folder = sub_folders[_idx]
+                    source_folders = [sub_folders[_idx]]
             except Exception:
                 pass
-        if not mgmt_folder:
-            return None, None
+        if not source_folders:
+            return None, None, None
 
-        # Step 3: Find most recent year folder — handles "2026", "FY2026", "FY 2026"
-        year_items = client.folders.get_folder_items(mgmt_folder.id, limit=200).entries
-        year_folders = []
-        for f in year_items:
-            if f.type.value != "folder":
-                continue
-            m = _re.search(r'20\d{2}', f.name)
-            if m:
-                year_folders.append((f, int(m.group())))
-        if not year_folders:
-            return None, None
-        latest_year = sorted(year_folders, key=lambda x: x[1], reverse=True)[0][0]
+        # Step 3: Collect all xlsx/pdf candidates from every source folder
+        all_candidates = []
+        for sf in source_folders:
+            all_candidates.extend(_collect_files_from_source(sf))
 
-        # Step 4: Find most recent month folder (named e.g. "03 2026", "01 2026")
-        month_items = client.folders.get_folder_items(latest_year.id, limit=200).entries
-        month_folders = [i for i in month_items if i.type.value == "folder"]
-        if not month_folders:
-            # No month subfolders — look for xlsx directly in year folder
-            xlsx_files = [
-                i for i in month_items
-                if i.type.value == "file" and i.name.lower().endswith(".xlsx")
-            ]
-            if not xlsx_files:
-                return None, None
-            target_file = xlsx_files[0]
-            latest_month = None
-        else:
-            def _month_sort(f):
-                try:
-                    return int(f.name.strip().split()[0])
-                except Exception:
-                    return 0
-            latest_month = sorted(month_folders, key=_month_sort, reverse=True)[0]
+        if not all_candidates:
+            return None, None, None
 
-            # Step 5: Find most recent xlsx in month folder
-            file_items = client.folders.get_folder_items(latest_month.id, limit=200).entries
-            xlsx_files = [
-                i for i in file_items
-                if i.type.value == "file" and i.name.lower().endswith(".xlsx")
-            ]
-            if not xlsx_files:
-                return None, None
-            target_file = xlsx_files[0]
+        # Step 4: Pick the single most recently modified file
+        # modified_at is an ISO string from Box; lexicographic sort works for ISO dates
+        target = sorted(all_candidates, key=lambda x: x["modified_at"], reverse=True)[0]
 
-        # Step 6: Download file content as bytes
-        import io
-        response = client.downloads.download_file(target_file.id)
+        # Step 5: Download file content as bytes
+        response = client.downloads.download_file(target["id"])
         buffer = io.BytesIO()
         if hasattr(response, 'read'):
             buffer.write(response.read())
@@ -3443,11 +3473,105 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
         else:
             buffer.write(response)
         buffer.seek(0)
-        return buffer.read(), target_file.name
+        return buffer.read(), target["name"], target["file_type"]
 
     except Exception as e:
         st.warning(f"Box sync error: {e}")
-        return None, None
+        return None, None, None
+
+
+def _extract_kpis_from_pdf(pdf_bytes: bytes, company_name: str) -> tuple[list[dict], list[str]]:
+    """
+    Extract KPI rows from a PDF board pack or management report using the
+    Claude API. Returns (rows, low_confidence_fields).
+
+    Each row maps to kpi_snapshots columns. Fields not found are left as None
+    — never guessed. low_confidence_fields lists "period|field" entries the
+    model was unsure about, for amber flagging in the preview.
+    """
+    import base64, json as _json
+    import anthropic as _anthropic
+
+    api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY not set")
+
+    pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+
+    schema_fields = [
+        "period_end_date", "reporting_currency", "fx_rate_to_usd",
+        "revenue_usd", "gross_profit_usd", "gross_margin_pct",
+        "ebitda_usd", "ebitda_margin_pct", "arr_usd", "mrr_usd",
+        "customer_count", "active_clients_count", "net_revenue_retention_pct",
+        "gross_churn_rate_pct", "cac_usd", "ltv_usd", "loan_book_gross_usd",
+        "npl_rate_pct", "par_30_pct", "par_90_pct", "net_yield_pct",
+        "cost_of_risk_pct", "nim_pct", "leverage_ratio", "aum_usd",
+        "gmv_usd", "tpv_usd", "unique_borrowers_count",
+        "top_3_concentration_pct", "insurance_policies_active",
+        "devices_connected", "net_income_usd", "net_margin_pct",
+    ]
+
+    prompt = (
+        f"You are extracting financial KPIs from a board pack or management "
+        f"report for {company_name}, an African fintech company. "
+        f"This data will feed an investor benchmarking platform, so accuracy "
+        f"is critical.\n\n"
+        f"Extract one JSON object per reporting period present in the document. "
+        f"Use these exact field names (omit any you cannot find — do NOT guess "
+        f"or estimate):\n{schema_fields}\n\n"
+        f"RULES:\n"
+        f"- period_end_date must be YYYY-MM-DD (last day of the period).\n"
+        f"- All *_usd fields in absolute USD (convert if the report uses "
+        f"another currency and a rate is given; if you convert, note it).\n"
+        f"- All *_pct fields as numbers (e.g. 45.4 for 45.4%, not 0.454).\n"
+        f"- If a figure is unclear, ambiguous, or you had to infer it, list it "
+        f"in low_confidence as 'PERIOD|field' (e.g. '2026-05-31|gross_margin_pct').\n"
+        f"- Never fabricate a number. A missing field is better than a wrong one.\n\n"
+        f"Return ONLY this JSON, no other text:\n"
+        f'{{"rows": [ {{...period objects...}} ], '
+        f'"low_confidence": ["PERIOD|field", ...], '
+        f'"source_pages": "brief note on which pages figures came from"}}'
+    )
+
+    client = _anthropic.Anthropic(api_key=api_key)
+    msg = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=4000,
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "document",
+                 "source": {"type": "base64",
+                            "media_type": "application/pdf",
+                            "data": pdf_b64}},
+                {"type": "text", "text": prompt},
+            ],
+        }],
+    )
+
+    raw = msg.content[0].text.strip()
+    raw = raw.replace("```json", "").replace("```", "").strip()
+    parsed = _json.loads(raw)
+
+    rows = parsed.get("rows", [])
+    low_conf = parsed.get("low_confidence", [])
+
+    for r in rows:
+        for k, v in list(r.items()):
+            if v in ("", None):
+                r[k] = None
+            elif k.endswith("_count") or k in ("insurance_policies_active", "devices_connected"):
+                try:
+                    r[k] = int(float(v))
+                except Exception:
+                    r[k] = None
+            elif k not in ("period_end_date", "reporting_currency"):
+                try:
+                    r[k] = float(v)
+                except Exception:
+                    r[k] = None
+
+    return rows, low_conf
 
 
 def render_upload_tab(info: pd.Series, company_id: int) -> None:
@@ -3468,16 +3592,18 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
         with col_box:
             if st.button("↓ Sync from Box", key=f"box_sync_{company_id}"):
                 with st.spinner("Fetching latest KPI file from Box…"):
-                    box_bytes, box_filename = _box_get_latest_kpi_file(company_name)
+                    box_bytes, box_filename, box_filetype = _box_get_latest_kpi_file(company_name)
                 if box_bytes:
-                    st.session_state[f"box_file_bytes_{company_id}"] = box_bytes
-                    st.session_state[f"box_file_name_{company_id}"]  = box_filename
+                    st.session_state[f"box_file_bytes_{company_id}"]  = box_bytes
+                    st.session_state[f"box_file_name_{company_id}"]   = box_filename
+                    st.session_state[f"box_is_pdf_{company_id}"]      = (box_filetype == "pdf")
+                    st.session_state.pop(f"box_pdf_low_conf_{company_id}", None)
                     st.rerun()
                 else:
                     st.error(
                         "No KPI file found in Box for this company. "
-                        "Check that the Management Accounts folder exists and "
-                        "contains a year → month → xlsx structure."
+                        "Check that the Management Accounts and Board Meetings "
+                        "folders exist and contain xlsx or pdf files."
                     )
         with col_info:
             st.markdown(
@@ -3574,20 +3700,27 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
     # ── PARSE ─────────────────────────────────────────────────────────────────
     # Re-parse whenever the file changes.  ss_fkey is cleared after every save,
     # so re-uploading the same file always goes through this block.
+    is_pdf = st.session_state.get(f"box_is_pdf_{company_id}", False)
     if st.session_state.get(ss_fkey) != file_key:
-        with st.spinner("Reading and parsing Excel file…"):
+        _spinner_msg = "Extracting KPIs from PDF using AI…" if is_pdf else "Reading and parsing Excel file…"
+        with st.spinner(_spinner_msg):
             try:
                 file_bytes = uploaded.read() if hasattr(uploaded, "read") else uploaded
                 if hasattr(uploaded, "seek"):
                     uploaded.seek(0)
-                all_rows   = PARSERS[company_name](file_bytes)
+
+                if is_pdf:
+                    all_rows, low_conf = _extract_kpis_from_pdf(file_bytes, company_name)
+                    st.session_state[f"box_pdf_low_conf_{company_id}"] = low_conf
+                else:
+                    all_rows = PARSERS[company_name](file_bytes)
 
                 existing         = _existing_periods(company_id)
                 existing_in_file = sum(1 for r in all_rows if r["period_end_date"] in existing)
 
                 st.session_state[ss_fkey]   = file_key
-                st.session_state[ss_parsed] = all_rows        # all rows; upsert handles insert vs update
-                st.session_state[ss_skip]   = existing_in_file  # periods that will be updated
+                st.session_state[ss_parsed] = all_rows
+                st.session_state[ss_skip]   = existing_in_file
             except Exception as exc:
                 st.error(f"Parse error: {exc}")
                 return
@@ -3614,6 +3747,28 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
         )
         return
 
+    # ── PDF WARNING + AMBER FLAGS ─────────────────────────────────────────────
+    if is_pdf:
+        _pdf_fname = st.session_state.get(f"box_file_name_{company_id}", "PDF")
+        st.markdown(
+            f"<div style='background:#FFF3E0;border:1px solid #E65100;border-radius:8px;"
+            f"padding:12px 18px;font-size:13px;color:#E65100;margin-bottom:10px'>"
+            f"⚠ This data was extracted from a PDF (<b>{_pdf_fname}</b>) using AI. "
+            f"PDF extraction can contain errors. Verify every figure against the source "
+            f"document before saving. An Excel KPI file is the preferred source where "
+            f"available.</div>",
+            unsafe_allow_html=True,
+        )
+        _low_conf = st.session_state.get(f"box_pdf_low_conf_{company_id}", [])
+        if _low_conf:
+            st.markdown(
+                f"<div style='background:#FFFDE7;border:1px solid #F9A825;border-radius:8px;"
+                f"padding:10px 16px;font-size:12px;color:#F57F17;margin-bottom:10px'>"
+                f"Verify these figures against the source PDF: "
+                f"<b>{', '.join(_low_conf)}</b></div>",
+                unsafe_allow_html=True,
+            )
+
     # ── PREVIEW TABLE ─────────────────────────────────────────────────────────
     _preview_label = f"{len(new_rows)} new period(s)"
     if update_rows:
@@ -3624,7 +3779,23 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
         f"color:{MUTED};font-weight:600;margin-bottom:10px'>{_preview_label}</div>",
         unsafe_allow_html=True,
     )
-    st.dataframe(_build_preview_df(cached_rows), use_container_width=True, hide_index=True)
+    if is_pdf:
+        _edited_df = st.data_editor(
+            _build_preview_df(cached_rows),
+            use_container_width=True,
+            hide_index=True,
+            key=f"pdf_editor_{company_id}_{file_key}",
+        )
+        # Sync edits back into cached_rows so confirm saves the corrected values
+        _col_map = {c: c for c in _edited_df.columns}
+        _edited_rows = _edited_df.to_dict(orient="records")
+        for orig, edited in zip(cached_rows, _edited_rows):
+            for col, val in edited.items():
+                if col in orig:
+                    orig[col] = None if (val != val or val == "") else val  # NaN → None
+        st.session_state[ss_parsed] = cached_rows
+    else:
+        st.dataframe(_build_preview_df(cached_rows), use_container_width=True, hide_index=True)
 
     # ── CONFIRM BUTTON ────────────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
@@ -3684,6 +3855,8 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
         st.session_state.pop(ss_fkey, None)
         st.session_state.pop(f"box_file_bytes_{company_id}", None)
         st.session_state.pop(f"box_file_name_{company_id}", None)
+        st.session_state.pop(f"box_is_pdf_{company_id}", None)
+        st.session_state.pop(f"box_pdf_low_conf_{company_id}", None)
         for _k in [k for k in st.session_state if k.startswith("_ws_")]:
             del st.session_state[_k]
         st.session_state["_cache_warmed"] = False
