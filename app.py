@@ -3494,9 +3494,10 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
         label_visibility="collapsed",
     )
 
-    # Box-injected file — treat identically to a manual upload
-    box_bytes = st.session_state.pop(f"box_file_bytes_{company_id}", None)
-    box_name  = st.session_state.pop(f"box_file_name_{company_id}", None)
+    # Box-injected file — treat identically to a manual upload.
+    # Use .get() (not .pop()) so bytes survive reruns until the save completes.
+    box_bytes = st.session_state.get(f"box_file_bytes_{company_id}")
+    box_name  = st.session_state.get(f"box_file_name_{company_id}")
     if box_bytes and not uploaded:
         import io
         uploaded = io.BytesIO(box_bytes)
@@ -3511,7 +3512,7 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
     ss_snap       = f"upload_snap_{company_id}"   # saved-periods snapshot for success display
     ss_commentary = f"upload_commentary_{company_id}"
 
-    if uploaded is None:
+    if uploaded is None and not st.session_state.get(f"box_file_bytes_{company_id}"):
         for k in (ss_fkey, ss_parsed, ss_skip, ss_saved, ss_snap, ss_commentary):
             st.session_state.pop(k, None)
         return
@@ -3576,7 +3577,9 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
     if st.session_state.get(ss_fkey) != file_key:
         with st.spinner("Reading and parsing Excel file…"):
             try:
-                file_bytes = uploaded.read()
+                file_bytes = uploaded.read() if hasattr(uploaded, "read") else uploaded
+                if hasattr(uploaded, "seek"):
+                    uploaded.seek(0)
                 all_rows   = PARSERS[company_name](file_bytes)
 
                 existing         = _existing_periods(company_id)
@@ -3679,6 +3682,8 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
         st.session_state[f"upload_db_path_{company_id}"]     = DB_PATH
         st.session_state[f"upload_row_count_{company_id}"]   = _vcount
         st.session_state.pop(ss_fkey, None)
+        st.session_state.pop(f"box_file_bytes_{company_id}", None)
+        st.session_state.pop(f"box_file_name_{company_id}", None)
         for _k in [k for k in st.session_state if k.startswith("_ws_")]:
             del st.session_state[_k]
         st.session_state["_cache_warmed"] = False
