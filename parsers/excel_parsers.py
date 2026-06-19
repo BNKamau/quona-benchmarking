@@ -233,9 +233,11 @@ def parse_verto(file_bytes: bytes) -> list[dict]:
     """
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
 
-    if "KPIs" not in wb.sheetnames:
-        raise ValueError(f"Sheet 'KPIs' not found. Sheets: {wb.sheetnames}")
-    ws = wb["KPIs"]
+    VERTO_SHEET_NAMES = ["KPIs", "New Template", "KPI", "Data", "Monthly KPIs"]
+    sheet_name = next((n for n in VERTO_SHEET_NAMES if n in wb.sheetnames), None)
+    if sheet_name is None:
+        sheet_name = wb.sheetnames[0]
+    ws = wb[sheet_name]
 
     row_rev = find_row(ws, "Total Revenue",                    label_col=1)
     row_gp  = find_row(ws, "Gross Profit",                     label_col=1)

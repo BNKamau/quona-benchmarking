@@ -3431,12 +3431,6 @@ def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[Non
                 return None, None
             target_file = xlsx_files[0]
 
-        st.session_state["box_debug"] = {
-            "year":  latest_year.name,
-            "month": latest_month.name if latest_month else "no month subfolder",
-            "file":  target_file.name,
-        }
-
         # Step 6: Download file content as bytes
         import io
         response = client.downloads.download_file(target_file.id)
@@ -3492,10 +3486,6 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
                 unsafe_allow_html=True,
             )
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-
-    if "box_debug" in st.session_state:
-        d = st.session_state["box_debug"]
-        st.info(f"Box pulled: year={d['year']} | month={d['month']} | file={d['file']}")
 
     uploaded = st.file_uploader(
         "Select Excel file",
