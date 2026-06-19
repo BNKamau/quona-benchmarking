@@ -3251,6 +3251,117 @@ def _build_preview_df(rows: list[dict]) -> pd.DataFrame:
     return df.loc[:, (df != "—").any(axis=0)]
 
 
+def _box_get_latest_kpi_file(company_name: str) -> tuple[bytes, str] | tuple[None, None]:
+    """
+    Navigate Box folder structure to find the most recent KPI xlsx for a company.
+
+    Path: Root → Fund folder → Portfolio Companies folder → Company folder
+          → 02 Management Accounts → most recent year folder
+          → most recent month folder → most recent .xlsx file
+
+    Returns (file_bytes, filename) or (None, None) if not found.
+    """
+    try:
+        from box_sdk_gen import BoxClient, BoxDeveloperTokenAuth
+
+        token = st.secrets.get("BOX_DEV_TOKEN", "")
+        if not token:
+            return None, None
+
+        auth   = BoxDeveloperTokenAuth(token=token)
+        client = BoxClient(auth)
+
+        # Fund folder mapping — which portfolio companies folder each company belongs to
+        FUND_MAP = {
+            "Verto":      "54633680859",   # 02 AQF Portfolio Companies
+            "Yoco":       "54633680859",
+            "Cowrywise":  "54633680859",
+            "Lulalend":   "54633680859",
+            "Khazna":     "54633680859",
+            "Enza":       "54633680859",
+            "TWINCO":     "54633680859",
+            "MaxSoko":    "54633680859",
+            "SAVA":       "54633680859",
+        }
+
+        portfolio_folder_id = FUND_MAP.get(company_name)
+        if not portfolio_folder_id:
+            return None, None
+
+        # Step 1: Find company folder inside Portfolio Companies
+        items = client.folders.get_folder_items(portfolio_folder_id, limit=200).entries
+        company_folder = next(
+            (i for i in items
+             if i.type.value == "folder"
+             and company_name.lower() in i.name.lower()),
+            None
+        )
+        if not company_folder:
+            return None, None
+
+        # Step 2: Find "02 Management Accounts" folder
+        sub_items = client.folders.get_folder_items(company_folder.id, limit=200).entries
+        mgmt_folder = next(
+            (i for i in sub_items
+             if i.type.value == "folder"
+             and "management account" in i.name.lower()),
+            None
+        )
+        if not mgmt_folder:
+            return None, None
+
+        # Step 3: Find most recent year folder (named as plain year e.g. "2026")
+        year_items = client.folders.get_folder_items(mgmt_folder.id, limit=200).entries
+        year_folders = [
+            i for i in year_items
+            if i.type.value == "folder" and i.name.strip().isdigit()
+        ]
+        if not year_folders:
+            return None, None
+        latest_year = sorted(year_folders, key=lambda f: int(f.name.strip()), reverse=True)[0]
+
+        # Step 4: Find most recent month folder (named e.g. "03 2026", "01 2026")
+        month_items = client.folders.get_folder_items(latest_year.id, limit=200).entries
+        month_folders = [i for i in month_items if i.type.value == "folder"]
+        if not month_folders:
+            # No month subfolders — look for xlsx directly in year folder
+            xlsx_files = [
+                i for i in month_items
+                if i.type.value == "file" and i.name.lower().endswith(".xlsx")
+            ]
+            if not xlsx_files:
+                return None, None
+            target_file = xlsx_files[0]
+        else:
+            def _month_sort(f):
+                try:
+                    return int(f.name.strip().split()[0])
+                except Exception:
+                    return 0
+            latest_month = sorted(month_folders, key=_month_sort, reverse=True)[0]
+
+            # Step 5: Find most recent xlsx in month folder
+            file_items = client.folders.get_folder_items(latest_month.id, limit=200).entries
+            xlsx_files = [
+                i for i in file_items
+                if i.type.value == "file" and i.name.lower().endswith(".xlsx")
+            ]
+            if not xlsx_files:
+                return None, None
+            target_file = xlsx_files[0]
+
+        # Step 6: Download file content as bytes
+        import io
+        buffer = io.BytesIO()
+        client.downloads.download_file(target_file.id, destination_file=buffer)
+        buffer.seek(0)
+        return buffer.read(), target_file.name
+
+    except Exception as e:
+        st.warning(f"Box sync error: {e}")
+        return None, None
+
+
 def render_upload_tab(info: pd.Series, company_id: int) -> None:
     company_name = info["name"]
 
@@ -3262,12 +3373,47 @@ def render_upload_tab(info: pd.Series, company_id: int) -> None:
         unsafe_allow_html=True,
     )
 
+    # ── Box sync button ───────────────────────────────────────────────────────
+    box_token = st.secrets.get("BOX_DEV_TOKEN", "")
+    if box_token:
+        col_box, col_info, _ = st.columns([2, 4, 2])
+        with col_box:
+            if st.button("↓ Sync from Box", key=f"box_sync_{company_id}"):
+                with st.spinner("Fetching latest KPI file from Box…"):
+                    box_bytes, box_filename = _box_get_latest_kpi_file(company_name)
+                if box_bytes:
+                    st.session_state[f"box_file_bytes_{company_id}"] = box_bytes
+                    st.session_state[f"box_file_name_{company_id}"]  = box_filename
+                    st.rerun()
+                else:
+                    st.error(
+                        "No KPI file found in Box for this company. "
+                        "Check that the Management Accounts folder exists and "
+                        "contains a year → month → xlsx structure."
+                    )
+        with col_info:
+            st.markdown(
+                f"<div style='font-size:11px;color:#93A3A1;padding-top:8px'>"
+                f"Pulls the most recent monthly KPI file from Box automatically.</div>",
+                unsafe_allow_html=True,
+            )
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
     uploaded = st.file_uploader(
         "Select Excel file",
         type=["xlsx"],
         key=f"uploader_{company_id}",
         label_visibility="collapsed",
     )
+
+    # Box-injected file — treat identically to a manual upload
+    box_bytes = st.session_state.pop(f"box_file_bytes_{company_id}", None)
+    box_name  = st.session_state.pop(f"box_file_name_{company_id}", None)
+    if box_bytes and not uploaded:
+        import io
+        uploaded = io.BytesIO(box_bytes)
+        uploaded.name = box_name
+        uploaded.size = len(box_bytes)
 
     # Session-state key names
     ss_fkey       = f"upload_fkey_{company_id}"
