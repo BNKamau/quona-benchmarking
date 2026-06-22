@@ -395,7 +395,18 @@ def _init_db() -> None:
 
     conn.commit()
 
-    # Idempotently add columns that were introduced after the initial schema
+    # Idempotently add columns that were introduced after the initial schema.
+    # Only sqlite3.OperationalError "duplicate column name" is expected; anything
+    # else is logged so real problems are not silently hidden.
+    def _add_col(table, col_def):
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
+            conn.commit()
+        except Exception as _e:
+            msg = str(_e).lower()
+            if "duplicate column" not in msg and "already exists" not in msg:
+                print(f"[schema migration] ALTER TABLE {table} ADD COLUMN {col_def}: {_e}")
+
     for col_def in [
         "net_income_usd         REAL",
         "net_margin_pct         REAL",
@@ -413,12 +424,11 @@ def _init_db() -> None:
         "fund                   TEXT",
         "sub_sector             TEXT",
     ]:
-        try:
-            table = "kpi_snapshots" if col_def.split()[0] not in ("fund", "sub_sector") else "companies"
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
-            conn.commit()
-        except Exception:
-            pass  # column already exists
+        table = "kpi_snapshots" if col_def.split()[0] not in ("fund", "sub_sector") else "companies"
+        _add_col(table, col_def)
+
+    for col_def in ["source_url TEXT", "discovered_via TEXT", "discovered_at TIMESTAMP"]:
+        _add_col("exit_comps", col_def)
 
     # Seed company registry only on a completely fresh DB.
     # We check count == 0 because companies has no UNIQUE constraint on name,
@@ -542,6 +552,170 @@ def load_stage_snapshots(comp_ids: tuple) -> pd.DataFrame:
                revenue_growth_pct, gross_margin_pct, ebitda_margin_pct
         FROM comp_stage_snapshots WHERE comp_id IN ({ph})
     """, _comps_conn(), params=list(comp_ids))
+
+
+def _discover_comps_via_claude(
+    company_name: str,
+    sub_sector: str,
+    geography: str,
+    founded_year,
+    latest_revenue_usd,
+    existing_comps: list[dict],
+) -> list[dict]:
+    """Use Claude + web search to find recent exits/listings that are genuine
+    comparables. Anchored on the company's existing curated comps as exemplars.
+    Undisclosed financials left None — never estimated."""
+    import json as _json
+    import anthropic as _anthropic
+
+    api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY not set in secrets.toml")
+
+    rev_str = f"~${latest_revenue_usd/1e6:.1f}M" if latest_revenue_usd else "undisclosed"
+    exemplars = "; ".join(
+        f"{c.get('company_name')} ({c.get('sub_sector')}, {c.get('geography')}, "
+        f"{c.get('exit_type')})" for c in existing_comps[:12]
+    ) or "none on record"
+
+    prompt = (
+        f"Find recent M&A exits and IPOs/listings that are GENUINE comparables "
+        f"for {company_name}: a {sub_sector} company in {geography}, founded "
+        f"{founded_year}, current revenue {rev_str}.\n\n"
+        f"These are the comps we already consider strong for this company — "
+        f"treat them as the gold standard of what a relevant comp looks like, "
+        f"and find more deals that resemble them in business model, stage, and "
+        f"market:\n{exemplars}\n\n"
+        f"Use web search to verify each deal against a credible source (company "
+        f"press release, regulator filing, reputable financial press). "
+        f"Prioritise the last 3 years.\n\n"
+        f"APPLY THIS RELEVANCE TEST to every candidate and EXCLUDE any that fail:\n"
+        f"- Sub-sector must match at the SPECIFIC level, not the broad level. A "
+        f"payments infrastructure company is not a comp for a consumer wallet. "
+        f"A B2B cross-border FX business is not a comp for a domestic card "
+        f"acquirer, even though all are 'payments'.\n"
+        f"- Stage and scale must be broadly comparable. Exclude deals where the "
+        f"company was an order of magnitude larger or smaller than {company_name} "
+        f"is now, unless it is a clear directional precedent.\n"
+        f"- Geography: prefer {geography}, but DELIBERATELY include relevant "
+        f"deals from other emerging markets (LatAm, SE Asia, MENA) where the "
+        f"model is genuinely analogous, for regional diversity. EXCLUDE "
+        f"developed-market mega-deals (US/EU large caps) unless a genuine "
+        f"strategic precedent for this specific company.\n\n"
+        f"It is better to return 3 highly relevant, well-sourced comps than 15 "
+        f"loosely related ones. Quality over coverage. Return [] rather than "
+        f"padding with marginal deals.\n\n"
+        f"Return ONLY a JSON array. Each object uses these exact keys:\n"
+        f"company_name, sub_sector, geography, exit_status, exit_year, exit_type "
+        f"(IPO | Strategic M&A | Financial Sponsor | Secondary), exit_ev_usd_m, "
+        f"revenue_at_exit_usd_m, gross_margin_pct, ebitda_margin_pct, "
+        f"ev_revenue_multiple, revenue_growth_at_exit, key_narrative_drivers, "
+        f"relevance_score (0-100 for {company_name}), mapping_rationale (one "
+        f"line stating WHY it passed the relevance test — if you cannot "
+        f"articulate a specific reason, do not return the comp), data_confidence "
+        f"(High/Medium/Low), source_url, low_confidence_fields (array of field "
+        f"names you are unsure about).\n\n"
+        f"CRITICAL RULES:\n"
+        f"- If a financial figure is not publicly disclosed, set it to null. "
+        f"Never estimate or infer. Null is correct and expected for private deals.\n"
+        f"- Every non-null financial figure must be supported by source_url.\n"
+        f"- Only include deals verified via web search. Skip rumoured deals.\n"
+        f"- *_usd_m in millions USD. *_pct as numbers (45.4 not 0.454).\n"
+        f"Return only the JSON array, no other text."
+    )
+
+    client = _anthropic.Anthropic(api_key=api_key)
+    msg = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=4000,
+        messages=[{"role": "user", "content": prompt}],
+        tools=[{"type": "web_search_20250305", "name": "web_search"}],
+    )
+
+    text = "".join(
+        b.text for b in msg.content if getattr(b, "type", "") == "text"
+    ).strip()
+    text = text.replace("```json", "").replace("```", "").strip()
+    start, end = text.find("["), text.rfind("]")
+    if start == -1 or end == -1:
+        return []
+    rows = _json.loads(text[start:end + 1])
+
+    for r in rows:
+        for k, v in list(r.items()):
+            if v in ("", None):
+                r[k] = None
+            elif k == "exit_year":
+                try: r[k] = int(float(v))
+                except Exception: r[k] = None
+            elif k.endswith(("_usd_m", "_pct", "_multiple", "_score")) or k == "revenue_growth_at_exit":
+                try: r[k] = float(v)
+                except Exception: r[k] = None
+    rows.sort(key=lambda r: r.get("relevance_score") or 0, reverse=True)
+    return rows
+
+
+def _save_discovered_comps(portfolio_company_name: str, comps: list[dict]) -> int:
+    """Write confirmed Claude-sourced comps to Postgres in a single transaction.
+    Converts 0-100 relevance score to 1-5 for portfolio_comp_mapping.
+    use_for_margins and use_for_multiples default to 0 so these comps appear
+    in the set for reference but don't affect median calculations until verified."""
+
+    def _to_1_5(score_100):
+        if score_100 is None:
+            return None
+        s = float(score_100)
+        if s >= 80: return 5
+        if s >= 60: return 4
+        if s >= 40: return 3
+        if s >= 20: return 2
+        return 1
+
+    conn = _get_pg_conn()
+    saved = 0
+    try:
+        cur = conn.cursor()
+        for c in comps:
+            cur.execute("""
+                INSERT INTO exit_comps
+                  (company_name, sub_sector, geography, exit_status, exit_year,
+                   exit_type, exit_ev_usd_m, revenue_at_exit_usd_m,
+                   gross_margin_pct, ebitda_margin_pct, ev_revenue_multiple,
+                   revenue_growth_at_exit, key_narrative_drivers, data_confidence,
+                   source_url, discovered_via, discovered_at,
+                   is_clean_exit, use_for_margins, use_for_multiples)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                        'claude_web_search', NOW(), 1, 0, 0)
+                RETURNING comp_id
+            """, (
+                c.get("company_name"), c.get("sub_sector"), c.get("geography"),
+                c.get("exit_status"), c.get("exit_year"), c.get("exit_type"),
+                c.get("exit_ev_usd_m"), c.get("revenue_at_exit_usd_m"),
+                c.get("gross_margin_pct"), c.get("ebitda_margin_pct"),
+                c.get("ev_revenue_multiple"), c.get("revenue_growth_at_exit"),
+                c.get("key_narrative_drivers"), c.get("data_confidence"),
+                c.get("source_url"),
+            ))
+            new_comp_id = cur.fetchone()[0]
+            cur.execute("""
+                INSERT INTO portfolio_comp_mapping
+                  (portfolio_company, comp_id, relevance_score, mapping_rationale)
+                VALUES (%s,%s,%s,%s)
+                ON CONFLICT DO NOTHING
+            """, (
+                _COMP_NAME_MAP.get(portfolio_company_name, portfolio_company_name),
+                new_comp_id,
+                _to_1_5(c.get("relevance_score")),
+                c.get("mapping_rationale"),
+            ))
+            saved += 1
+        conn.commit()
+    except Exception:
+        raise
+    finally:
+        conn.close()
+    return saved
+
 
 def load_companies(db_version: str = "") -> pd.DataFrame:
     _key = "_ws_companies"
@@ -2833,6 +3007,175 @@ def render_benchmarking_tab(
                 st.markdown(
                     f"**{row['company_name']}** ({row.get('relevance_score','?')}/5) — {rationale}"
                 )
+
+    # ── Claude comp discovery ──────────────────────────────────────────────────
+    st.markdown(
+        f"<div style='font-size:11px;text-transform:uppercase;letter-spacing:.6px;"
+        f"color:{MUTED};font-weight:600;margin:28px 0 6px'>"
+        f"Discover Comps with Claude (Web Search)</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div style='font-size:12px;color:{MUTED};margin-bottom:14px;line-height:1.6'>"
+        f"Claude surfaces and sources recent deals. Private deal financials are often "
+        f"undisclosed and will show as blank. Claude-sourced comps are added for "
+        f"reference and excluded from benchmark medians until you verify and enable "
+        f"them.</div>",
+        unsafe_allow_html=True,
+    )
+
+    _sug_key = f"comp_suggestions_{company_id}"
+
+    if st.button("Search for recent comps", key=f"discover_comps_{company_id}"):
+        _c2 = _conn()
+        _ss_row = _c2.execute(
+            "SELECT sub_sector FROM companies WHERE id = %s", (company_id,)
+        ).fetchone()
+        _c2.close()
+        _sub_sector = (_ss_row[0] if _ss_row else None) or info.get("sub_sector") or ""
+        try:
+            with st.spinner("Searching the web for recent exits and listings…"):
+                _found = _discover_comps_via_claude(
+                    company_name=company_name,
+                    sub_sector=_sub_sector,
+                    geography=info.get("hq_country") or "",
+                    founded_year=info.get("founded_year"),
+                    latest_revenue_usd=ltm_val,
+                    existing_comps=comps.to_dict("records"),
+                )
+            st.session_state[_sug_key] = _found
+        except Exception as _exc:
+            st.error(f"Discovery failed: {_exc}")
+
+    _suggestions = st.session_state.get(_sug_key)
+
+    if _suggestions is not None:
+        if not _suggestions:
+            st.markdown(
+                f"<div style='font-size:13px;color:{MUTED};font-style:italic;margin-top:8px'>"
+                f"No high-confidence comps found. Try again or add comps manually.</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            def _fmt_fld(val, key, low_conf_keys):
+                if val is None:
+                    return f"<span style='color:{MUTED}'>&mdash;</span>"
+                color = WARN if key in low_conf_keys else BLACK
+                if key.endswith("_pct"):
+                    return f"<span style='color:{color}'>{float(val):.1f}%</span>"
+                if key.endswith("_usd_m"):
+                    return f"<span style='color:{color}'>${float(val):.0f}M</span>"
+                if key.endswith("_multiple"):
+                    return f"<span style='color:{color}'>{float(val):.1f}x</span>"
+                return f"<span style='color:{color}'>{val}</span>"
+
+            st.markdown(
+                f"<div style='background:{BG};border:2px dashed {BORDER};"
+                f"border-radius:10px;padding:14px 18px 6px;margin-top:4px'>"
+                f"<div style='font-size:10px;font-weight:700;text-transform:uppercase;"
+                f"letter-spacing:.6px;color:{MUTED};margin-bottom:14px'>"
+                f"Suggested — not yet in your comp set &nbsp;·&nbsp; "
+                f"{len(_suggestions)} found, sorted by relevance</div></div>",
+                unsafe_allow_html=True,
+            )
+
+            _selected_idxs: list[int] = []
+            for _i, _sug in enumerate(_suggestions):
+                _low_conf: list = _sug.get("low_confidence_fields") or []
+                if isinstance(_low_conf, str):
+                    import json as _js
+                    try: _low_conf = _js.loads(_low_conf)
+                    except Exception: _low_conf = [_low_conf]
+                _rel_score = float(_sug.get("relevance_score") or 0)
+                _opacity   = "0.6" if _rel_score < 60 else "1"
+
+                _c_sel, _c_info, _c_fin, _c_score = st.columns([0.5, 4.5, 3.5, 1.5])
+
+                with _c_sel:
+                    _checked = st.checkbox(
+                        "", key=f"cs_{company_id}_{_i}",
+                        value=False, label_visibility="collapsed",
+                    )
+                    if _checked:
+                        _selected_idxs.append(_i)
+
+                with _c_info:
+                    _src  = _sug.get("source_url") or ""
+                    _co   = _sug.get("company_name") or "—"
+                    _et   = _sug.get("exit_type") or "—"
+                    _yr   = _sug.get("exit_year")
+                    _geo  = _sug.get("geography") or "—"
+                    _rat  = _sug.get("mapping_rationale") or ""
+                    _yr_s = str(int(_yr)) if _yr else "—"
+                    _name_html = (
+                        f"<a href='{_src}' target='_blank' rel='noopener noreferrer' "
+                        f"style='color:{BLACK};font-weight:700;text-decoration:underline;"
+                        f"text-underline-offset:2px'>{_co}</a>"
+                        if _src else
+                        f"<span style='font-weight:700;color:{BLACK}'>{_co}</span>"
+                    )
+                    st.markdown(
+                        f"<div style='opacity:{_opacity};padding-top:2px'>"
+                        + _name_html
+                        + f"<span style='color:{MUTED};font-size:11px;margin-left:8px'>"
+                        + f"{_et} &nbsp;·&nbsp; {_yr_s} &nbsp;·&nbsp; {_geo}</span>"
+                        + (
+                            f"<div style='font-size:11px;color:{MUTED};margin-top:3px;"
+                            f"line-height:1.4'>{_rat}</div>"
+                            if _rat else ""
+                        )
+                        + "</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                with _c_fin:
+                    _rv_h = _fmt_fld(_sug.get("revenue_at_exit_usd_m"), "revenue_at_exit_usd_m", _low_conf)
+                    _ev_h = _fmt_fld(_sug.get("exit_ev_usd_m"),         "exit_ev_usd_m",         _low_conf)
+                    _gm_h = _fmt_fld(_sug.get("gross_margin_pct"),      "gross_margin_pct",      _low_conf)
+                    _em_h = _fmt_fld(_sug.get("ebitda_margin_pct"),     "ebitda_margin_pct",     _low_conf)
+                    _mx_h = _fmt_fld(_sug.get("ev_revenue_multiple"),   "ev_revenue_multiple",   _low_conf)
+                    _conf = str(_sug.get("data_confidence") or "").capitalize()
+                    st.markdown(
+                        f"<div style='font-size:12px;opacity:{_opacity};line-height:1.9'>"
+                        f"Rev: {_rv_h} &nbsp;·&nbsp; EV: {_ev_h}<br>"
+                        f"GM: {_gm_h} &nbsp;·&nbsp; EM: {_em_h} &nbsp;·&nbsp; EV/Rev: {_mx_h}"
+                        + (f"<br><span style='font-size:10px;color:{MUTED}'>Confidence: {_conf}</span>" if _conf else "")
+                        + "</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                with _c_score:
+                    _sc_clr = "#2E7D32" if _rel_score >= 70 else (WARN if _rel_score >= 50 else "#C62828")
+                    st.markdown(
+                        f"<div style='text-align:center;opacity:{_opacity};padding-top:4px'>"
+                        f"<span style='font-size:16px;font-weight:700;color:{_sc_clr}'>"
+                        f"{int(_rel_score)}</span>"
+                        f"<span style='font-size:10px;color:{MUTED}'>/100</span></div>",
+                        unsafe_allow_html=True,
+                    )
+
+                if _i < len(_suggestions) - 1:
+                    st.markdown(
+                        f"<div style='height:1px;background:{BORDER};margin:6px 0 8px'></div>",
+                        unsafe_allow_html=True,
+                    )
+
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            if st.button("Add selected to comp set", key=f"add_disc_{company_id}"):
+                _to_save = [_suggestions[_j] for _j in _selected_idxs]
+                if not _to_save:
+                    st.warning("Tick at least one comp to add.")
+                else:
+                    try:
+                        _n = _save_discovered_comps(company_name, _to_save)
+                        load_comp_mapping.clear()
+                        load_comps_detail.clear()
+                        load_stage_snapshots.clear()
+                        st.session_state.pop(_sug_key, None)
+                        st.success(f"Added {_n} comp{'s' if _n != 1 else ''} — reloading…")
+                        st.rerun()
+                    except Exception as _exc:
+                        st.error(f"Save failed: {_exc}")
 
 
 # ── DB write helpers ──────────────────────────────────────────────────────────
