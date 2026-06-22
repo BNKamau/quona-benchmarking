@@ -4454,101 +4454,13 @@ def classify_exit_relevant(interactions: list[dict]) -> list[dict]:
 
 # ── Yoco Affinity helper ──────────────────────────────────────────────────────
 
-def fetch_last_affinity_note_for_buyer(buyer_name: str, affinity_api_key: str, company_being_exited: str = "") -> dict | None:
+def fetch_last_affinity_note_for_buyer(buyer_name: str, affinity_api_key: str,
+                                       company_being_exited: str = "") -> dict | None:
     try:
         import requests, difflib, json as _json, anthropic as _anthropic
-
         AUTH = ("", affinity_api_key)
         BASE = "https://api.affinity.co"
 
-        # ── Step 1: Find the right org using Claude disambiguation ──────────
-        r = requests.get(f"{BASE}/organizations", params={"term": buyer_name}, auth=AUTH, timeout=15)
-        r.raise_for_status()
-        candidates = r.json().get("organizations", [])
-        if not candidates:
-            return None
-
-        org_id = None
-
-        if len(candidates) == 1:
-            org_id = candidates[0]["id"]
-        else:
-            # Build candidate list for Claude to disambiguate
-            cand_lines = []
-            for i, c in enumerate(candidates[:5]):
-                name = c.get("name", "")
-                domain = (c.get("domain") or c.get("domains") or [""])[0] if isinstance(c.get("domains"), list) else c.get("domain", "")
-                desc = (c.get("description") or "")[:120]
-                cand_lines.append(f"{i}: name={name} | domain={domain} | description={desc}")
-
-            cache_key = f"_affinity_org_disambig_{buyer_name}"
-            if cache_key in st.session_state:
-                org_id = st.session_state[cache_key]
-            else:
-                try:
-                    _ac = _anthropic.Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY", ""))
-                    _msg = _ac.messages.create(
-                        model="claude-haiku-4-5",
-                        max_tokens=10,
-                        messages=[{
-                            "role": "user",
-                            "content": (
-                                f"We are looking for the Affinity CRM record for '{buyer_name}' "
-                                f"in the context of African fintech venture capital and exit processes. "
-                                f"Candidates:\n" + "\n".join(cand_lines) +
-                                f"\nWhich index (0-{len(cand_lines)-1}) best matches '{buyer_name}' "
-                                f"as a financial investor or strategic acquirer active in African fintech? "
-                                f"Reply with only the integer index. If none match, reply -1."
-                            )
-                        }]
-                    )
-                    idx = int(_msg.content[0].text.strip())
-                    org_id = candidates[idx]["id"] if 0 <= idx < len(candidates) else None
-                except Exception:
-                    # Fallback: best fuzzy name match
-                    scored = sorted(
-                        candidates[:5],
-                        key=lambda c: difflib.SequenceMatcher(None, buyer_name.lower(), c.get("name","").lower()).ratio(),
-                        reverse=True
-                    )
-                    best = scored[0]
-                    if difflib.SequenceMatcher(None, buyer_name.lower(), best.get("name","").lower()).ratio() >= 0.6:
-                        org_id = best["id"]
-
-                st.session_state[cache_key] = org_id
-
-        if not org_id:
-            return None
-
-        # ── Step 2: Fetch org-level notes ────────────────────────────────────
-        r = requests.get(f"{BASE}/notes", params={"organization_id": org_id}, auth=AUTH, timeout=15)
-        r.raise_for_status()
-        all_notes = r.json().get("notes", [])
-
-        # ── Step 3: Fetch person-level notes for all persons in this org ─────
-        try:
-            r2 = requests.get(f"{BASE}/organizations/{org_id}", auth=AUTH, timeout=15)
-            person_ids = r2.json().get("person_ids", [])
-            for pid in person_ids[:8]:  # cap at 8 to avoid rate limits
-                rp = requests.get(f"{BASE}/notes", params={"person_id": pid}, auth=AUTH, timeout=10)
-                if rp.ok:
-                    all_notes.extend(rp.json().get("notes", []))
-        except Exception:
-            pass
-
-        # Deduplicate by note id
-        seen_ids = set()
-        deduped = []
-        for n in all_notes:
-            nid = n.get("id")
-            if nid not in seen_ids:
-                seen_ids.add(nid)
-                deduped.append(n)
-
-        if not deduped:
-            return None
-
-        # ── Step 4: Parse dates and sort DESCENDING — most recent first ──────
         def _note_dt(n):
             raw = n.get("created_at", "")
             if not raw:
@@ -4556,89 +4468,126 @@ def fetch_last_affinity_note_for_buyer(buyer_name: str, affinity_api_key: str, c
             dt = datetime.fromisoformat(raw)
             return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
-        deduped.sort(key=_note_dt, reverse=True)  # newest first
+        # 1. Find the right org (Claude disambiguation, fuzzy fallback)
+        r = requests.get(f"{BASE}/organizations", params={"term": buyer_name}, auth=AUTH, timeout=15)
+        r.raise_for_status()
+        cands = r.json().get("organizations", [])
+        if not cands:
+            return None
+        if len(cands) == 1:
+            org_id = cands[0]["id"]
+        else:
+            cache_key = f"_aff_org_{buyer_name}"
+            if cache_key in st.session_state:
+                org_id = st.session_state[cache_key]
+            else:
+                lines = []
+                for i, c in enumerate(cands[:5]):
+                    dom = ""
+                    if isinstance(c.get("domains"), list) and c["domains"]:
+                        dom = c["domains"][0]
+                    elif c.get("domain"):
+                        dom = c["domain"]
+                    lines.append(f"{i}: {c.get('name','')} | {dom}")
+                org_id = None
+                try:
+                    _ac = _anthropic.Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY", ""))
+                    m = _ac.messages.create(
+                        model="claude-haiku-4-5", max_tokens=10,
+                        messages=[{"role": "user", "content": (
+                            f"We want the Affinity record for '{buyer_name}', an investor or "
+                            f"strategic acquirer active in African fintech. Candidates:\n"
+                            + "\n".join(lines) +
+                            f"\nReply with only the best-matching index number, or -1 if none fit."
+                        )}],
+                    )
+                    idx = int(m.content[0].text.strip())
+                    org_id = cands[idx]["id"] if 0 <= idx < len(cands) else None
+                except Exception:
+                    best = max(cands[:5], key=lambda c: difflib.SequenceMatcher(
+                        None, buyer_name.lower(), c.get("name", "").lower()).ratio())
+                    if difflib.SequenceMatcher(None, buyer_name.lower(),
+                                               best.get("name", "").lower()).ratio() >= 0.6:
+                        org_id = best["id"]
+                st.session_state[cache_key] = org_id
+        if not org_id:
+            return None
 
-        # ── Step 5: Stale check on the single most recent note ───────────────
-        most_recent_dt = _note_dt(deduped[0])
-        date_str = most_recent_dt.strftime("%Y-%m-%d")
-        cutoff_90 = datetime.now(tz=timezone.utc) - timedelta(days=90)
-        if most_recent_dt < cutoff_90:
+        # 2. Org-level + person-level notes
+        all_notes = []
+        try:
+            r = requests.get(f"{BASE}/notes", params={"organization_id": org_id}, auth=AUTH, timeout=15)
+            if r.ok:
+                all_notes.extend(r.json().get("notes", []))
+        except Exception:
+            pass
+        try:
+            ro = requests.get(f"{BASE}/organizations/{org_id}", auth=AUTH, timeout=15)
+            pids = ro.json().get("person_ids", []) if ro.ok else []
+            for pid in pids[:8]:
+                rp = requests.get(f"{BASE}/notes", params={"person_id": pid}, auth=AUTH, timeout=10)
+                if rp.ok:
+                    all_notes.extend(rp.json().get("notes", []))
+        except Exception:
+            pass
+
+        seen, notes = set(), []
+        for n in all_notes:
+            nid = n.get("id")
+            if nid not in seen:
+                seen.add(nid)
+                notes.append(n)
+        if not notes:
+            return None
+        notes.sort(key=_note_dt, reverse=True)
+
+        # 3. Stale check on most recent note overall
+        newest = _note_dt(notes[0])
+        date_str = newest.strftime("%Y-%m-%d") if newest != datetime.min.replace(tzinfo=timezone.utc) else ""
+        if newest < datetime.now(tz=timezone.utc) - timedelta(days=90):
             return {"date": date_str, "creator_name": None, "snippet": None, "stale": True}
 
-        # ── Step 6: Exit-relevance keyword scoring across all recent notes ────
-        exit_keywords = [
-            "acquisition", "acquire", "acquirer", "m&a", "strategic",
-            "exit", "secondary", "liquidity", "sell", "sale", "buyer",
-            "term sheet", "loi", "due diligence", "valuation", "offer",
-            "interest", "mandate", "process", "banker", "transaction",
-            "verto", "yoco", "lulalend", "cowrywise", "khazna", "enza",
-            "twinco", "maxsoko", "sava",
-        ]
+        # 4. Exit-relevance ranking
+        kw = ["acquisition", "acquire", "acquirer", "m&a", "strategic", "exit",
+              "secondary", "liquidity", "sell", "sale", "buyer", "term sheet",
+              "loi", "due diligence", "valuation", "offer", "interest", "mandate",
+              "process", "banker", "transaction"]
         if company_being_exited:
-            exit_keywords.append(company_being_exited.lower())
-
+            kw.append(company_being_exited.lower())
         def _score(n):
-            text = (n.get("content") or "").lower()
-            return sum(1 for kw in exit_keywords if kw in text)
+            t = (n.get("content") or "").lower()
+            return sum(1 for k in kw if k in t)
+        ranked = sorted(notes, key=lambda n: (_score(n), _note_dt(n).timestamp()), reverse=True)
+        top = ranked[:3]
 
-        # Score all notes, sort by (score DESC, date DESC)
-        scored_notes = sorted(deduped, key=lambda n: (_score(n), _note_dt(n).timestamp()), reverse=True)
-
-        # Take top 3 by relevance score; if all score 0, take 3 most recent
-        top_notes = scored_notes[:3]
-
-        # ── Step 7: Claude summarization ─────────────────────────────────────
-        note_texts = []
-        for n in top_notes:
-            content = (n.get("content") or "").strip()
-            dt_str = _note_dt(n).strftime("%Y-%m-%d")
-            note_texts.append(f"[{dt_str}] {content[:800]}")
-
-        combined = "\n---\n".join(note_texts)
-        company_context = company_being_exited or "the portfolio company being exited"
-
+        # 5. Claude one-sentence summary
+        company_ctx = company_being_exited or "the portfolio company being exited"
+        blocks = [f"[{_note_dt(n).strftime('%Y-%m-%d')}] {(n.get('content') or '').strip()[:800]}" for n in top]
+        combined = "\n---\n".join(blocks)
         summary = None
         try:
             _ac = _anthropic.Anthropic(api_key=st.secrets.get("ANTHROPIC_API_KEY", ""))
-            _msg = _ac.messages.create(
-                model="claude-haiku-4-5",
-                max_tokens=80,
-                messages=[{
-                    "role": "user",
-                    "content": (
-                        f"You are a VC associate reviewing CRM notes about '{buyer_name}' "
-                        f"in the context of a potential acquisition of {company_context}, "
-                        f"a B2B fintech company.\n\n"
-                        f"Notes:\n{combined}\n\n"
-                        f"Write ONE sentence (max 25 words) summarizing what was discussed "
-                        f"specifically relating to an acquisition, investment, or exit of "
-                        f"{company_context}. Include who spoke to whom if mentioned.\n"
-                        f"If none of these notes discuss an acquisition, exit, or investment "
-                        f"relating to {company_context}, respond with exactly: "
-                        f"'No exit-relevant discussion found.'\n"
-                        f"Do not summarize LP fundraising, portfolio construction, or "
-                        f"general market commentary."
-                    )
-                }]
+            m = _ac.messages.create(
+                model="claude-haiku-4-5", max_tokens=80,
+                messages=[{"role": "user", "content": (
+                    f"These are recent Affinity CRM notes about '{buyer_name}' in the context "
+                    f"of a potential acquisition of {company_ctx}, a B2B fintech.\n\n{combined}\n\n"
+                    f"Write ONE sentence (max 25 words) on what was discussed relating to an "
+                    f"acquisition, investment, or exit of {company_ctx}, including who spoke to "
+                    f"whom if stated. If none of these notes discuss an acquisition, exit, or "
+                    f"investment relating to {company_ctx}, reply exactly: "
+                    f"'No exit-relevant discussion found.' Do not summarize LP fundraising, "
+                    f"portfolio construction, or general market commentary."
+                )}],
             )
-            summary = _msg.content[0].text.strip()
+            summary = m.content[0].text.strip()
         except Exception:
-            # Fallback: first 150 chars of most recent note ending at word boundary
-            fallback_content = (top_notes[0].get("content") or "").strip()
-            if len(fallback_content) > 150:
-                fallback_content = fallback_content[:150].rsplit(" ", 1)[0] + "…"
-            summary = fallback_content
-
+            ft = (top[0].get("content") or "").strip()
+            summary = (ft[:150].rsplit(" ", 1)[0] + "…") if len(ft) > 150 else ft
         if not summary:
             summary = "No exit-relevant discussion found."
 
-        return {
-            "date":         date_str,
-            "creator_name": None,
-            "snippet":      summary,
-            "stale":        False,
-        }
-
+        return {"date": date_str, "creator_name": None, "snippet": summary, "stale": False}
     except Exception:
         return None
 
