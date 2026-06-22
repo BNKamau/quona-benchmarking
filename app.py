@@ -8907,48 +8907,39 @@ def render_exit_tab(info: pd.Series, company_id: int) -> None:
 
     # ── Enza custom exit tab ───────────────────────────────────────────────────
     if company_name == "Enza":
-        _render_enza_exit_tab()
-        return
+        return _render_enza_exit_tab()
 
     # ── SAVA custom exit tab ────────────────────────────────────────────────────
     if company_name == "SAVA":
-        _render_sava_exit_tab()
-        return
+        return _render_sava_exit_tab()
 
     # ── Cowrywise custom exit tab ──────────────────────────────────────────────
     if company_name == "Cowrywise":
-        _render_cowrywise_exit_tab()
-        return
+        return _render_cowrywise_exit_tab()
 
     # ── Yoco custom exit tab ───────────────────────────────────────────────────
     if company_name == "Yoco":
-        _render_yoco_exit_tab()
-        return
+        return _render_yoco_exit_tab()
 
     # ── Lulalend custom exit tab ───────────────────────────────────────────────
     if company_name == "Lulalend":
-        _render_lulalend_exit_tab()
-        return
+        return _render_lulalend_exit_tab()
 
     # ── VertoFX custom exit tab ────────────────────────────────────────────────
     if company_name in ("VertoFX", "Verto FX"):
-        _render_vertofx_exit_tab()
-        return
+        return _render_vertofx_exit_tab()
 
     # ── TWINCO custom exit tab ─────────────────────────────────────────────────
     if company_name in ("TWINCO", "Twinco"):
-        _render_twinco_exit_tab()
-        return
+        return _render_twinco_exit_tab()
 
     # ── MaxSoko custom exit tab ────────────────────────────────────────────────
     if company_name == "MaxSoko":
-        _render_maxsoko_exit_tab()
-        return
+        return _render_maxsoko_exit_tab()
 
     # ── Khazna custom exit tab ─────────────────────────────────────────────────
     if company_name == "Khazna":
-        _render_khazna_exit_tab()
-        return
+        return _render_khazna_exit_tab()
 
     LIKELIHOOD_OPTS = ["Exploratory", "Active", "Advanced", "On Hold"]
     STATUS_OPTS     = ["Not Started", "Warm", "Active", "Passed"]
