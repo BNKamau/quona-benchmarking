@@ -3047,135 +3047,128 @@ def render_benchmarking_tab(
         except Exception as _exc:
             st.error(f"Discovery failed: {_exc}")
 
-    _suggestions = st.session_state.get(_sug_key)
+    _suggestions = st.session_state.get(_sug_key) or []
 
-    if _suggestions is not None:
-        if not _suggestions:
-            st.markdown(
-                f"<div style='font-size:13px;color:{MUTED};font-style:italic;margin-top:8px'>"
-                f"No high-confidence comps found. Try again or add comps manually.</div>",
-                unsafe_allow_html=True,
-            )
-        else:
-            def _fmt_fld(val, key, low_conf_keys):
-                if val is None:
-                    return f"<span style='color:{MUTED}'>&mdash;</span>"
-                color = WARN if key in low_conf_keys else BLACK
-                if key.endswith("_pct"):
-                    return f"<span style='color:{color}'>{float(val):.1f}%</span>"
-                if key.endswith("_usd_m"):
-                    return f"<span style='color:{color}'>${float(val):.0f}M</span>"
-                if key.endswith("_multiple"):
-                    return f"<span style='color:{color}'>{float(val):.1f}x</span>"
-                return f"<span style='color:{color}'>{val}</span>"
+    if _suggestions:
+        def _fmt_fld(val, key, low_conf_keys):
+            if val is None:
+                return f"<span style='color:{MUTED}'>&mdash;</span>"
+            color = WARN if key in low_conf_keys else BLACK
+            if key.endswith("_pct"):
+                return f"<span style='color:{color}'>{float(val):.1f}%</span>"
+            if key.endswith("_usd_m"):
+                return f"<span style='color:{color}'>${float(val):.0f}M</span>"
+            if key.endswith("_multiple"):
+                return f"<span style='color:{color}'>{float(val):.1f}x</span>"
+            return f"<span style='color:{color}'>{val}</span>"
 
-            st.markdown(
-                f"<div style='background:{BG};border:2px dashed {BORDER};"
-                f"border-radius:10px;padding:14px 18px 6px;margin-top:4px'>"
-                f"<div style='font-size:10px;font-weight:700;text-transform:uppercase;"
-                f"letter-spacing:.6px;color:{MUTED};margin-bottom:14px'>"
-                f"Suggested — not yet in your comp set &nbsp;·&nbsp; "
-                f"{len(_suggestions)} found, sorted by relevance</div></div>",
-                unsafe_allow_html=True,
-            )
+        st.markdown(
+            f"<div style='background:{BG};border:2px dashed {BORDER};"
+            f"border-radius:10px;padding:14px 18px 6px;margin-top:4px'>"
+            f"<div style='font-size:10px;font-weight:700;text-transform:uppercase;"
+            f"letter-spacing:.6px;color:{MUTED};margin-bottom:14px'>"
+            f"Suggested — not yet in your comp set &nbsp;·&nbsp; "
+            f"{len(_suggestions)} found, sorted by relevance</div></div>",
+            unsafe_allow_html=True,
+        )
 
-            _selected_idxs: list[int] = []
-            for _i, _sug in enumerate(_suggestions):
-                _low_conf: list = _sug.get("low_confidence_fields") or []
-                if isinstance(_low_conf, str):
-                    import json as _js
-                    try: _low_conf = _js.loads(_low_conf)
-                    except Exception: _low_conf = [_low_conf]
-                _rel_score = float(_sug.get("relevance_score") or 0)
-                _opacity   = "0.6" if _rel_score < 60 else "1"
+        _selected_idxs: list[int] = []
+        for _i, _sug in enumerate(_suggestions):
+            _low_conf: list = _sug.get("low_confidence_fields") or []
+            if isinstance(_low_conf, str):
+                import json as _js
+                try: _low_conf = _js.loads(_low_conf)
+                except Exception: _low_conf = [_low_conf]
+            _rel_score = float(_sug.get("relevance_score") or 0)
+            _opacity   = "0.6" if _rel_score < 60 else "1"
 
-                _c_sel, _c_info, _c_fin, _c_score = st.columns([0.5, 4.5, 3.5, 1.5])
+            _c_sel, _c_info, _c_fin, _c_score = st.columns([0.5, 4.5, 3.5, 1.5])
 
-                with _c_sel:
-                    _checked = st.checkbox(
-                        "", key=f"cs_{company_id}_{_i}",
-                        value=False, label_visibility="collapsed",
+            with _c_sel:
+                _checked = st.checkbox(
+                    "", key=f"cs_{company_id}_{_i}",
+                    value=False, label_visibility="collapsed",
+                )
+                if _checked:
+                    _selected_idxs.append(_i)
+
+            with _c_info:
+                _src  = _sug.get("source_url") or ""
+                _co   = _sug.get("company_name") or "—"
+                _et   = _sug.get("exit_type") or "—"
+                _yr   = _sug.get("exit_year")
+                _geo  = _sug.get("geography") or "—"
+                _rat  = _sug.get("mapping_rationale") or ""
+                _yr_s = str(int(_yr)) if _yr else "—"
+                _name_html = (
+                    f"<a href='{_src}' target='_blank' rel='noopener noreferrer' "
+                    f"style='color:{BLACK};font-weight:700;text-decoration:underline;"
+                    f"text-underline-offset:2px'>{_co}</a>"
+                    if _src else
+                    f"<span style='font-weight:700;color:{BLACK}'>{_co}</span>"
+                )
+                st.markdown(
+                    f"<div style='opacity:{_opacity};padding-top:2px'>"
+                    + _name_html
+                    + f"<span style='color:{MUTED};font-size:11px;margin-left:8px'>"
+                    + f"{_et} &nbsp;·&nbsp; {_yr_s} &nbsp;·&nbsp; {_geo}</span>"
+                    + (
+                        f"<div style='font-size:11px;color:{MUTED};margin-top:3px;"
+                        f"line-height:1.4'>{_rat}</div>"
+                        if _rat else ""
                     )
-                    if _checked:
-                        _selected_idxs.append(_i)
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
 
-                with _c_info:
-                    _src  = _sug.get("source_url") or ""
-                    _co   = _sug.get("company_name") or "—"
-                    _et   = _sug.get("exit_type") or "—"
-                    _yr   = _sug.get("exit_year")
-                    _geo  = _sug.get("geography") or "—"
-                    _rat  = _sug.get("mapping_rationale") or ""
-                    _yr_s = str(int(_yr)) if _yr else "—"
-                    _name_html = (
-                        f"<a href='{_src}' target='_blank' rel='noopener noreferrer' "
-                        f"style='color:{BLACK};font-weight:700;text-decoration:underline;"
-                        f"text-underline-offset:2px'>{_co}</a>"
-                        if _src else
-                        f"<span style='font-weight:700;color:{BLACK}'>{_co}</span>"
-                    )
-                    st.markdown(
-                        f"<div style='opacity:{_opacity};padding-top:2px'>"
-                        + _name_html
-                        + f"<span style='color:{MUTED};font-size:11px;margin-left:8px'>"
-                        + f"{_et} &nbsp;·&nbsp; {_yr_s} &nbsp;·&nbsp; {_geo}</span>"
-                        + (
-                            f"<div style='font-size:11px;color:{MUTED};margin-top:3px;"
-                            f"line-height:1.4'>{_rat}</div>"
-                            if _rat else ""
-                        )
-                        + "</div>",
-                        unsafe_allow_html=True,
-                    )
+            with _c_fin:
+                _rv_h = _fmt_fld(_sug.get("revenue_at_exit_usd_m"), "revenue_at_exit_usd_m", _low_conf)
+                _ev_h = _fmt_fld(_sug.get("exit_ev_usd_m"),         "exit_ev_usd_m",         _low_conf)
+                _gm_h = _fmt_fld(_sug.get("gross_margin_pct"),      "gross_margin_pct",      _low_conf)
+                _em_h = _fmt_fld(_sug.get("ebitda_margin_pct"),     "ebitda_margin_pct",     _low_conf)
+                _mx_h = _fmt_fld(_sug.get("ev_revenue_multiple"),   "ev_revenue_multiple",   _low_conf)
+                _conf = str(_sug.get("data_confidence") or "").capitalize()
+                st.markdown(
+                    f"<div style='font-size:12px;opacity:{_opacity};line-height:1.9'>"
+                    f"Rev: {_rv_h} &nbsp;·&nbsp; EV: {_ev_h}<br>"
+                    f"GM: {_gm_h} &nbsp;·&nbsp; EM: {_em_h} &nbsp;·&nbsp; EV/Rev: {_mx_h}"
+                    + (f"<br><span style='font-size:10px;color:{MUTED}'>Confidence: {_conf}</span>" if _conf else "")
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
 
-                with _c_fin:
-                    _rv_h = _fmt_fld(_sug.get("revenue_at_exit_usd_m"), "revenue_at_exit_usd_m", _low_conf)
-                    _ev_h = _fmt_fld(_sug.get("exit_ev_usd_m"),         "exit_ev_usd_m",         _low_conf)
-                    _gm_h = _fmt_fld(_sug.get("gross_margin_pct"),      "gross_margin_pct",      _low_conf)
-                    _em_h = _fmt_fld(_sug.get("ebitda_margin_pct"),     "ebitda_margin_pct",     _low_conf)
-                    _mx_h = _fmt_fld(_sug.get("ev_revenue_multiple"),   "ev_revenue_multiple",   _low_conf)
-                    _conf = str(_sug.get("data_confidence") or "").capitalize()
-                    st.markdown(
-                        f"<div style='font-size:12px;opacity:{_opacity};line-height:1.9'>"
-                        f"Rev: {_rv_h} &nbsp;·&nbsp; EV: {_ev_h}<br>"
-                        f"GM: {_gm_h} &nbsp;·&nbsp; EM: {_em_h} &nbsp;·&nbsp; EV/Rev: {_mx_h}"
-                        + (f"<br><span style='font-size:10px;color:{MUTED}'>Confidence: {_conf}</span>" if _conf else "")
-                        + "</div>",
-                        unsafe_allow_html=True,
-                    )
+            with _c_score:
+                _sc_clr = "#2E7D32" if _rel_score >= 70 else (WARN if _rel_score >= 50 else "#C62828")
+                st.markdown(
+                    f"<div style='text-align:center;opacity:{_opacity};padding-top:4px'>"
+                    f"<span style='font-size:16px;font-weight:700;color:{_sc_clr}'>"
+                    f"{int(_rel_score)}</span>"
+                    f"<span style='font-size:10px;color:{MUTED}'>/100</span></div>",
+                    unsafe_allow_html=True,
+                )
 
-                with _c_score:
-                    _sc_clr = "#2E7D32" if _rel_score >= 70 else (WARN if _rel_score >= 50 else "#C62828")
-                    st.markdown(
-                        f"<div style='text-align:center;opacity:{_opacity};padding-top:4px'>"
-                        f"<span style='font-size:16px;font-weight:700;color:{_sc_clr}'>"
-                        f"{int(_rel_score)}</span>"
-                        f"<span style='font-size:10px;color:{MUTED}'>/100</span></div>",
-                        unsafe_allow_html=True,
-                    )
+            if _i < len(_suggestions) - 1:
+                st.markdown(
+                    f"<div style='height:1px;background:{BORDER};margin:6px 0 8px'></div>",
+                    unsafe_allow_html=True,
+                )
 
-                if _i < len(_suggestions) - 1:
-                    st.markdown(
-                        f"<div style='height:1px;background:{BORDER};margin:6px 0 8px'></div>",
-                        unsafe_allow_html=True,
-                    )
-
-            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-            if st.button("Add selected to comp set", key=f"add_disc_{company_id}"):
-                _to_save = [_suggestions[_j] for _j in _selected_idxs]
-                if not _to_save:
-                    st.warning("Tick at least one comp to add.")
-                else:
-                    try:
-                        _n = _save_discovered_comps(company_name, _to_save)
-                        load_comp_mapping.clear()
-                        load_comps_detail.clear()
-                        load_stage_snapshots.clear()
-                        st.session_state.pop(_sug_key, None)
-                        st.success(f"Added {_n} comp{'s' if _n != 1 else ''} — reloading…")
-                        st.rerun()
-                    except Exception as _exc:
-                        st.error(f"Save failed: {_exc}")
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        if st.button("Add selected to comp set", key=f"add_disc_{company_id}"):
+            _to_save = [_suggestions[_j] for _j in _selected_idxs]
+            if not _to_save:
+                st.warning("Tick at least one comp to add.")
+            else:
+                try:
+                    _n = _save_discovered_comps(company_name, _to_save)
+                    load_comp_mapping.clear()
+                    load_comps_detail.clear()
+                    load_stage_snapshots.clear()
+                    st.session_state.pop(_sug_key, None)
+                    st.success(f"Added {_n} comp{'s' if _n != 1 else ''} — reloading…")
+                    st.rerun()
+                except Exception as _exc:
+                    st.error(f"Save failed: {_exc}")
 
 
 # ── DB write helpers ──────────────────────────────────────────────────────────
